@@ -20,8 +20,10 @@ A full-stack Python web application with **three integrated UI modes**:
 - [Stock Screener Feature](#stock-screener-feature)
 - [Query-Based Screening](#query-based-screening)
 - [Dynamic Stock Universes](#dynamic-stock-universes)
+- [LLM Enrichment Feature](#llm-enrichment-feature)
 - [API Endpoints](#api-endpoints)
 - [Target Confidence Model](#target-confidence-model)
+- [Environment Variables](#environment-variables)
 - [Key Design Decisions](#key-design-decisions)
 - [Getting Started](#getting-started)
 - [Supported Markets](#supported-markets)
@@ -42,16 +44,19 @@ Enter a stock ticker (e.g. `AAPL`, `RELIANCE.NS`, `TCS.BO`) and the system:
 4. **Renders an interactive candlestick chart** using TradingView's Lightweight Charts with overlaid moving averages, Bollinger Bands, support/resistance lines, and trade level markers
 5. **Computes probabilistic target confidence** using a 7-factor institutional model (trend, momentum, volume, volatility feasibility, distance decay, trend maturity, market regime)
 6. **Returns everything as a single JSON API response** — optimized for both human display and LLM consumption
+7. **Optional AI-powered analysis** — Enable LLM enrichment for structured insights including verdict (BUY/WATCHLIST/HOLD/AVOID), confidence score, trend stage, investment thesis, and entry strategy
 
-### Feature 2: Query Filter (NEW)
+### Feature 2: Query Filter
 
 Click the "Query Filter" tab and:
 
 1. **Write Screener.in-style queries** — natural language conditions like `RSI > 50 AND Current price > 1.05 * DMA 200`
 2. **Select stock universe** — Nifty 50/100/200/500, All NSE/F&O (~500 stocks), Shariah-38, or custom tickers
-3. **Run filter** — parallel data fetching for 500+ stocks completes in ~30 seconds
-4. **View matched stocks** — clickable ticker badges, detailed table with RSI, DMA50/200, 52W High/Low, Market Cap, P/E
-5. **Transfer to Screener** — click "Use in Screener →" to run full multi-factor analysis on filtered results
+3. **Combine multiple Screener.in URLs** — Fetch stocks from multiple public screens and combine them
+4. **Run filter** — parallel data fetching for 500+ stocks completes in ~30 seconds
+5. **View matched stocks** — clickable ticker badges, detailed table with RSI, DMA50/200, 52W High/Low, Market Cap, P/E
+6. **Enable LLM enrichment** — Get AI-powered verdicts, confidence scores, and entry strategies for top matches
+7. **Transfer to Screener** — click "Use in Screener →" to run full multi-factor analysis on filtered results
 
 ### Feature 3: Stock Screener
 
@@ -156,6 +161,7 @@ The screener gives each stock a **composite score from 0 to 100**:
 | Backend     | **FastAPI** (async Python web framework)     | Handles HTTP requests, serves the API           |
 | Data Source | **yfinance** (Yahoo Finance API wrapper)     | Fetches stock prices and fundamental data       |
 | NSE Data    | **httpx** (HTTP client for NSE India API)    | Fetches index constituents, F&O stocks          |
+| LLM APIs    | **httpx** (async HTTP for OpenAI/Azure/Anthropic) | AI-powered stock analysis and insights     |
 | Computation | **pandas** + **numpy** (no external TA libs) | Number crunching for indicators and analysis    |
 | Parallelism | **ThreadPoolExecutor** (concurrent.futures)  | Parallel data fetching for 500+ stocks          |
 | Validation  | **Pydantic** v2 (schema models)              | Ensures data has the right shape and types      |
@@ -175,7 +181,7 @@ numpy==2.2.1           → Math library for fast number crunching
 pydantic==2.10.4       → Data validation — makes sure API inputs/outputs are correct
 cachetools==5.5.1      → Caching library — avoids re-downloading the same data
 python-dotenv==1.0.1   → Loads environment variables from .env files
-httpx==0.28.1          → HTTP client for NSE India API (index constituents)
+httpx==0.28.1          → HTTP client for NSE India API and LLM providers
 ```
 
 ---
@@ -205,6 +211,9 @@ stock-analyzer/
 │   │   ├── screener.py             # ★ Stock screener engine (multi-factor scoring)
 │   │   ├── query_engine.py         # ★ Query parser and evaluator (Screener.in-style)
 │   │   └── stock_universe.py       # ★ Dynamic universe fetcher (NSE indices, F&O)
+│   ├── services/                   # External service integrations
+│   │   ├── __init__.py
+│   │   └── llm_enrichment.py       # ★ LLM-powered analysis (OpenAI/Azure/Anthropic)
 │   ├── models/
 │   │   ├── __init__.py
 │   │   └── schemas.py              # Pydantic v2 request/response models
@@ -240,6 +249,8 @@ User enters ticker (e.g. "RELIANCE.NS")
        ▼
   Assembles AnalysisReport (Pydantic model)
   + computes quant scores, derived signals, trade levels with confidence
+       │
+       ├── (optional) llm_enrichment.py → LLM analysis (if include_llm=true)
        │
        ▼
   Returns JSON → Frontend renders dashboard + candlestick chart
@@ -396,8 +407,26 @@ Fetches stock lists from external sources:
 - **NSE India API** — Nifty 50/100/200/500, sector indices (IT, Bank, Pharma, etc.)
 - **F&O Stocks** — All derivatives-eligible stocks from NSE
 - **Screener.in** — Public screen URLs and native queries (requires login)
+- **Multiple Screener.in URLs** — Combine stocks from multiple screens using `screener_urls` array
 - **Caching** — 5-minute TTL to avoid repeated API calls
 - **Session Management** — Authenticated Screener.in sessions with 1-hour expiry
+
+### `app/services/llm_enrichment.py` — LLM Enrichment Layer
+
+Adds AI-powered analysis on top of existing stock metrics:
+- **Multi-provider support** — OpenAI, Azure OpenAI, Anthropic Claude
+- **Stock classification** — Auto-tags stocks (uptrend, momentum, breakout, value, etc.)
+- **Structured prompts** — JSON schema enforcement prevents hallucination
+- **Parallel enrichment** — Enriches multiple stocks concurrently (configurable)
+- **Response caching** — 1-hour TTL cache with daily auto-invalidation
+- **Verdict ranking** — Sorts results by BUY → WATCHLIST → HOLD → AVOID
+
+Key functions:
+- `classify_stock_tags()` — Tags stocks based on metrics (momentum, breakout, value)
+- `build_llm_payload()` — Constructs structured payload for LLM
+- `call_llm()` — Makes async API call with provider-specific formatting
+- `enrich_stocks()` — Enriches multiple stocks in parallel
+- `sort_by_verdict()` — Orders results by trading verdict
 
 ### `app/engine/trade_plan.py` — Trade Level Calculator
 
@@ -406,8 +435,10 @@ Computes actionable trade levels: entry point, 3 price targets (T1, T2, T3), 3 s
 ### `app/models/schemas.py` — Data Models
 
 Defines the exact structure of every request and response using Pydantic:
-- `AnalysisRequest` / `AnalysisReport` — for /api/analyze
+- `AnalysisRequest` / `AnalysisReport` — for /api/analyze (supports `include_llm` flag)
 - `ScreenerRequest` / `ScreenedStock` / `ScreenerReport` — for /api/screen
+- `QueryScreenerReport` / `QueryScreenerReportWithLLM` — for query-based screening
+- `LLMAnalysis` / `LLMEnrichedStock` / `LLMEnrichmentSummary` — for LLM enrichment
 - Sub-models: `Meta`, `PriceSnapshot`, `TrendStructure`, `MomentumSignals`, etc.
 
 ### `app/cache/memory_cache.py` — Caching
@@ -525,7 +556,17 @@ allocation_i = capital × weight_i
 | `capital` | 100,000 | Investment capital in INR |
 | `max_risk_pct` | 7.0 | Maximum downside risk per stock (%) |
 | `horizon_months` | 12 | Investment horizon in months |
-| `top_n` | 10 | Number of top stocks to return (1–30) |
+| `top_n` | 10 | Number of top stocks to return (1–100) |
+| `custom_tickers` | — | Comma-separated ticker symbols (overrides default universe) |
+| `universe` | — | Stock universe (nifty50, nifty500, all_nse, etc.) |
+| `screener_url` | — | Single Screener.in screen URL to fetch stocks from |
+| `screener_urls` | — | Array of Screener.in URLs to combine stocks from |
+| `screener_query` | — | Screener.in native query syntax |
+| `query` | — | Single query string for filtering (Screener.in-style) |
+| `queries` | — | Array of query strings for multi-query screening |
+| `include_or` | false | Support OR conditions in queries (default: AND-only) |
+| `include_llm` | false | Enable LLM analysis for top stocks |
+| `llm_max_stocks` | 15 | Maximum stocks to enrich with LLM (1–30) |
 
 ### Screener Response Structure
 
@@ -780,6 +821,27 @@ curl -X POST http://localhost:8000/api/screen \
   }'
 ```
 
+#### Screen with Multiple Screener.in URLs
+
+Combine stocks from multiple Screener.in screens:
+
+```bash
+curl -X POST http://localhost:8000/api/screen \
+  -H "Content-Type: application/json" \
+  -d '{
+    "screener_urls": [
+      "https://www.screener.in/screens/71/",
+      "https://www.screener.in/screens/3625029/",
+      "https://www.screener.in/screens/1234/"
+    ],
+    "query": "RSI > 50 AND RSI < 70",
+    "include_llm": true,
+    "top_n": 20
+  }'
+```
+
+Stocks from all URLs are combined and deduplicated before screening.
+
 #### Screen with Screener.in Query
 
 Run a Screener.in native query to fetch stocks, then apply your filter:
@@ -798,10 +860,11 @@ curl -X POST http://localhost:8000/api/screen \
 
 When multiple universe parameters are provided:
 1. `custom_tickers` (highest priority)
-2. `screener_url`
-3. `screener_query`
-4. `universe`
-5. Default 38-stock Shariah universe (fallback)
+2. `screener_urls` (array of URLs)
+3. `screener_url` (single URL)
+4. `screener_query`
+5. `universe`
+6. Default 38-stock Shariah universe (fallback)
 
 #### Screener.in Authentication
 
@@ -900,18 +963,218 @@ Returns all available fields, operators, and example queries.
 
 ---
 
+## LLM Enrichment Feature
+
+The application includes an optional AI-powered analysis layer that enriches stock data with structured insights using Large Language Models (LLMs).
+
+### Overview
+
+When enabled, LLM enrichment provides:
+- **Trading Verdict** — BUY, WATCHLIST, HOLD, or AVOID recommendation
+- **Confidence Score** — 0.0 to 1.0 probability of success
+- **Trend Stage Classification** — EARLY_TREND, CONFIRMED_UPTREND, LATE_STAGE, DISTRIBUTION, DOWNTREND, ACCUMULATION
+- **Investment Thesis** — 2-4 bullet points with specific metrics
+- **Strength Signals** — Trend alignment, momentum quality, volume support, price structure
+- **Risk Flags** — 1-3 key risk factors to monitor
+- **Entry Strategy** — Trigger condition, price zone, position sizing, time horizon
+
+### Supported LLM Providers
+
+| Provider | Environment Variable | Default Model |
+|----------|---------------------|---------------|
+| **OpenAI** | `LLM_PROVIDER=openai` | gpt-4o-mini |
+| **Azure OpenAI** | `LLM_PROVIDER=azure` | Deployment name |
+| **Anthropic** | `LLM_PROVIDER=anthropic` | claude-3-sonnet |
+
+### Enabling LLM Enrichment
+
+#### Single Stock Analysis
+
+```bash
+curl -X POST http://localhost:8000/api/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"ticker": "TCS.NS", "include_llm": true}'
+```
+
+#### Query Screening
+
+```bash
+curl -X POST http://localhost:8000/api/screen \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "RSI > 50 AND RSI < 70",
+    "universe": "nifty100",
+    "include_llm": true,
+    "llm_max_stocks": 15
+  }'
+```
+
+### LLM Analysis Response Structure
+
+When `include_llm=true`, the response includes an `llm_analysis` field:
+
+```json
+{
+  "llm_analysis": {
+    "verdict": "BUY",
+    "confidence": 0.78,
+    "stage": "CONFIRMED_UPTREND",
+    "thesis": [
+      "Strong trend alignment with price above all key MAs (50/100/200)",
+      "RSI at 62 indicates healthy momentum without overbought conditions",
+      "Volume ratio of 1.8x confirms institutional accumulation"
+    ],
+    "strength_signals": {
+      "trend_alignment": "Bullish — all MAs aligned upward",
+      "momentum_quality": "Strong — RSI in optimal zone",
+      "volume_support": "Confirmed — above-average accumulation",
+      "price_structure": "Higher highs and higher lows intact"
+    },
+    "risk_flags": [
+      "Near 52-week high — potential resistance at 2850",
+      "Elevated ADX (35) suggests trend may be maturing"
+    ],
+    "entry_strategy": {
+      "trigger": "Pullback to 20-DMA or breakout above 2850 with volume",
+      "zone": "₹2680-2720 for pullback entry",
+      "position_size": "2-3% of portfolio given moderate risk",
+      "time_horizon": "3-6 months for swing trade"
+    }
+  }
+}
+```
+
+### Stock Classification Tags
+
+The LLM enrichment layer automatically classifies stocks with tags based on their metrics:
+
+| Tag | Criteria |
+|-----|----------|
+| `duplicate` | Appears in multiple queries (higher conviction) |
+| `uptrend` | Primary trend is bullish |
+| `downtrend` | Primary trend is bearish |
+| `momentum` | RSI between 50-70 |
+| `overbought` | RSI > 70 |
+| `oversold` | RSI < 30 |
+| `high_volume` | Volume ratio > 1.5x average |
+| `near_52w_high` | Within 5% of 52-week high |
+| `breakout` | Near 52W high with high volume |
+| `strong_trend` | ADX > 25 |
+| `golden_cross` | MA 50 > MA 200 |
+| `value` | P/E undervalued vs sector |
+| `high_roe` | ROE > 20% |
+| `moat` | Strong competitive moat assessment |
+
+### Multi-Query Mode with LLM
+
+In multi-query mode, stocks appearing in multiple queries are prioritized for LLM enrichment:
+
+```bash
+curl -X POST http://localhost:8000/api/screen \
+  -H "Content-Type: application/json" \
+  -d '{
+    "queries": [
+      "RSI > 50 AND RSI < 70",
+      "Current price > 1.05 * DMA 200",
+      "Price to earning < 30 AND Debt to equity < 0.5"
+    ],
+    "include_llm": true,
+    "llm_max_stocks": 20
+  }'
+```
+
+Response includes:
+- `duplicates` — Tickers appearing in 2+ queries (highest conviction)
+- `llm_enriched` — Array of stocks with LLM analysis
+- `llm_summary` — Summary of verdicts and stages distribution
+
+### LLM Response with Enrichment Summary
+
+```json
+{
+  "mode": "multi_query",
+  "matched_tickers": ["TCS.NS", "INFY.NS", "DRREDDY.NS"],
+  "duplicates": ["TCS.NS", "INFY.NS"],
+  "llm_enriched": [
+    {
+      "stock": "TCS.NS",
+      "tags": ["duplicate", "uptrend", "momentum", "golden_cross"],
+      "metrics": { ... },
+      "llm": { "verdict": "BUY", "confidence": 0.82, ... }
+    }
+  ],
+  "llm_summary": {
+    "total_enriched": 15,
+    "successful": 14,
+    "failed": 1,
+    "cached": 5,
+    "verdicts": {"BUY": 6, "WATCHLIST": 5, "HOLD": 2, "AVOID": 1},
+    "stages": {"CONFIRMED_UPTREND": 8, "EARLY_TREND": 4, "LATE_STAGE": 2}
+  }
+}
+```
+
+### LLM Cache Management
+
+LLM responses are cached for 1 hour to reduce API costs:
+
+```bash
+# Check cache statistics
+curl http://localhost:8000/api/llm/cache
+
+# Clear cache (for fresh analysis)
+curl -X DELETE http://localhost:8000/api/llm/cache
+```
+
+### Configuration
+
+Set these environment variables to configure LLM:
+
+```bash
+# Provider (openai, azure, anthropic)
+LLM_PROVIDER=openai
+
+# API Key
+LLM_API_KEY=sk-your-api-key
+
+# Model
+LLM_MODEL=gpt-4o-mini
+
+# API Base URL (for custom endpoints)
+LLM_BASE_URL=https://api.openai.com/v1
+
+# Azure-specific
+LLM_API_VERSION=2023-07-01-preview
+
+# Performance
+LLM_TIMEOUT=30
+LLM_MAX_PARALLEL=5
+LLM_TEMPERATURE=0.2
+```
+
+### UI Toggle
+
+In the frontend, LLM enrichment can be enabled via:
+- **Technical Analysis mode**: Toggle "Enable AI Analysis" before running analysis
+- **Query Filter mode**: Toggle "Enable LLM Enrichment" and set max stocks
+- **Stock Screener mode**: Toggle "Include AI Analysis" option
+
+---
+
 ## API Endpoints
 
-| Method | Path               | Description                               |
-|--------|--------------------|-------------------------------------------|
-| GET    | `/`                | Main dashboard UI (SPA)                   |
-| POST   | `/api/analyze`     | Full technical analysis (JSON)            |
-| POST   | `/api/screen`      | Stock screener (multi-factor or query-based) |
-| GET    | `/api/screen/help` | Query-based screening documentation       |
-| GET    | `/api/screen/universes` | List available stock universes       |
-| POST   | `/api/screen/validate` | Validate a query without executing    |
-| GET    | `/api/quote/{sym}` | Quick price quote                         |
-| GET    | `/api/health`      | Health check                              |
+| Method | Path                    | Description                                    |
+|--------|-------------------------|------------------------------------------------|
+| GET    | `/`                     | Main dashboard UI (SPA)                        |
+| POST   | `/api/analyze`          | Full technical analysis (JSON)                 |
+| POST   | `/api/screen`           | Stock screener (multi-factor or query-based)   |
+| GET    | `/api/screen/help`      | Query-based screening documentation            |
+| GET    | `/api/screen/universes` | List available stock universes                 |
+| POST   | `/api/screen/validate`  | Validate a query without executing             |
+| GET    | `/api/quote/{sym}`      | Quick price quote                              |
+| GET    | `/api/health`           | Health check                                   |
+| GET    | `/api/llm/cache`        | LLM cache statistics                           |
+| DELETE | `/api/llm/cache`        | Clear LLM response cache                       |
 
 ### Example: Technical Analysis
 
@@ -919,6 +1182,14 @@ Returns all available fields, operators, and example queries.
 curl -X POST http://localhost:8000/api/analyze \
   -H "Content-Type: application/json" \
   -d '{"ticker": "AAPL"}'
+```
+
+### Example: Technical Analysis with LLM Enrichment
+
+```bash
+curl -X POST http://localhost:8000/api/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"ticker": "AAPL", "include_llm": true}'
 ```
 
 ### Example: Stock Screener
@@ -935,7 +1206,36 @@ Or with defaults (no body needed):
 curl -X POST http://localhost:8000/api/screen
 ```
 
-### Analysis Response Structure (10 Sections)
+### Example: Query Screening with LLM Enrichment
+
+```bash
+curl -X POST http://localhost:8000/api/screen \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "RSI > 50 AND RSI < 70 AND Market Capitalization > 500",
+    "universe": "nifty500",
+    "include_llm": true,
+    "llm_max_stocks": 15,
+    "top_n": 20
+  }'
+```
+
+### Example: Multiple Screener.in URLs
+
+```bash
+curl -X POST http://localhost:8000/api/screen \
+  -H "Content-Type: application/json" \
+  -d '{
+    "screener_urls": [
+      "https://www.screener.in/screens/71/",
+      "https://www.screener.in/screens/3625029/"
+    ],
+    "query": "RSI > 50",
+    "include_llm": true
+  }'
+```
+
+### Analysis Response Structure (10 Sections + Optional LLM)
 
 ```
 {
@@ -951,7 +1251,9 @@ curl -X POST http://localhost:8000/api/screen
   "trade_levels"         → entry, 3 targets (T1-T3), 3 stop-losses (SL1-SL3), R:R ratio,
                            confidence_percent per target, ATR multiples
   "chart_data"           → 2 years of OHLCV for frontend chart rendering
+  "llm_analysis"         → (optional) AI-powered verdict, confidence, thesis, entry strategy
 }
+```
 ```
 
 ---
@@ -978,6 +1280,69 @@ Result is clamped between 5% and 95%.
 
 ---
 
+## Environment Variables
+
+The application supports configuration via environment variables for different deployment scenarios.
+
+### LLM Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LLM_PROVIDER` | `openai` | LLM provider: `openai`, `azure`, `anthropic` |
+| `LLM_API_KEY` | — | API key for the LLM provider (required for LLM features) |
+| `LLM_MODEL` | `gpt-4o-mini` | Model name or deployment name (Azure) |
+| `LLM_BASE_URL` | `https://api.openai.com/v1` | API base URL (for custom endpoints) |
+| `LLM_API_VERSION` | `2023-07-01-preview` | Azure OpenAI API version |
+| `LLM_TIMEOUT` | `30` | Request timeout in seconds |
+| `LLM_MAX_PARALLEL` | `5` | Maximum concurrent LLM requests |
+| `LLM_TEMPERATURE` | `0.2` | LLM temperature (0.0-1.0) |
+
+### Screener.in Authentication
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SCREENER_USERNAME` | — | Screener.in email for authenticated access |
+| `SCREENER_PASSWORD` | — | Screener.in password |
+
+### Example Configuration
+
+**Windows PowerShell:**
+```powershell
+$env:LLM_PROVIDER = "openai"
+$env:LLM_API_KEY = "sk-your-api-key"
+$env:LLM_MODEL = "gpt-4o-mini"
+$env:SCREENER_USERNAME = "your-email@example.com"
+$env:SCREENER_PASSWORD = "your-password"
+uvicorn app.main:app --host localhost --port 8000
+```
+
+**Linux/Mac:**
+```bash
+export LLM_PROVIDER="openai"
+export LLM_API_KEY="sk-your-api-key"
+export LLM_MODEL="gpt-4o-mini"
+export SCREENER_USERNAME="your-email@example.com"
+export SCREENER_PASSWORD="your-password"
+uvicorn app.main:app --host localhost --port 8000
+```
+
+**Using .env file:**
+
+Create a `.env` file in the project root:
+```env
+# LLM Configuration
+LLM_PROVIDER=openai
+LLM_API_KEY=sk-your-api-key
+LLM_MODEL=gpt-4o-mini
+LLM_TEMPERATURE=0.2
+
+# Screener.in Authentication (optional)
+SCREENER_USERNAME=your-email@example.com
+SCREENER_PASSWORD=your-password
+```
+
+---
+
 ## Key Design Decisions
 
 | Decision | Reasoning |
@@ -996,6 +1361,10 @@ Result is clamped between 5% and 95%.
 | Dynamic universe fetching | NSE API integration fetches live index constituents (no hardcoded lists) |
 | Safe expression evaluation | Query parser uses tokenization, not `eval()` — no security risks |
 | Three-mode UI | Separates concerns: quick filter, deep analysis, portfolio allocation |
+| Multi-provider LLM support | Supports OpenAI, Azure OpenAI, and Anthropic for flexibility |
+| LLM response caching | 1-hour TTL cache reduces API costs; auto-invalidates daily |
+| Structured LLM output | JSON schema enforcement prevents hallucination and ensures parseable responses |
+| Multiple Screener.in URLs | Combine stocks from multiple screens for comprehensive universe |
 
 ---
 
@@ -1125,6 +1494,12 @@ Indian tickers auto-resolve: entering `RELIANCE` will automatically try `RELIANC
 | Chart not rendering | Make sure you're using a modern browser (Chrome, Firefox, Edge). Clear browser cache if stuck |
 | Query validation error | Check field name spelling, use spaces around operators (`RSI > 50` not `RSI>50`) |
 | "Use in Screener" button not working | Make sure Query Filter has matched tickers (check results summary) |
+| LLM enrichment not working | Set `LLM_API_KEY` environment variable with your OpenAI/Azure/Anthropic API key |
+| "LLM_API_KEY not set" warning | Export your API key: `export LLM_API_KEY=sk-your-key` or add to `.env` file |
+| LLM timeout errors | Increase `LLM_TIMEOUT` env var (default 30 seconds). Consider reducing `llm_max_stocks` |
+| "LLM returned invalid JSON" | The model returned malformed JSON — retry or try a different model |
+| LLM cache not clearing | Use `DELETE /api/llm/cache` endpoint or restart the server |
+| Azure OpenAI errors | Set `LLM_PROVIDER=azure`, `LLM_BASE_URL` to your Azure endpoint, and `LLM_API_VERSION` |
 
 ---
 
@@ -1142,14 +1517,19 @@ The dashboard supports **three integrated modes** with seamless transitions:
 - Quant score heatmap
 - Trade levels panel with confidence bars and ATR multiples
 - Quick ticker shortcuts (US: AAPL, TSLA, MSFT | India: RELIANCE.NS, TCS.NS, INFY.NS)
+- **LLM Enrichment Toggle**: Enable AI-powered analysis with verdict, confidence, and entry strategy
 
-### Query Filter Mode (Green) — NEW
-- **Query Input**: Textarea for Screener.in-style queries
+### Query Filter Mode (Green)
+- **Query Input**: Textarea for Screener.in-style queries (supports multi-query mode)
 - **Example Queries**: Click-to-use templates for Growth Momentum, Near 52-Week High, Quality + Momentum, Oversold Large Caps
+- **Multi-Query Mode Toggle**: Add/remove multiple queries for higher conviction filtering
+- **Screener.in URLs**: Input multiple Screener.in screen URLs (one per line) to combine stocks
 - **Stock Universe Dropdown**:
   - All NSE / F&O (~500 stocks)
   - Nifty 500, Nifty 200, Nifty 100, Nifty 50
   - Shariah-38 (default compliant universe)
+- **LLM Enrichment Toggle**: Enable AI analysis for top matched stocks
+- **LLM Max Stocks Setting**: Configure how many stocks to enrich (1-30)
 - **Available Fields Reference**: Expandable documentation of all supported fields
 - **Progress Indicator**: Step-by-step progress during parallel data fetching
 - **Results Display**:
@@ -1157,11 +1537,13 @@ The dashboard supports **three integrated modes** with seamless transitions:
   - **"Use in Screener →"** button to transfer matched tickers
   - Clickable ticker badges for quick technical analysis
   - Detailed table: Price, RSI, vs DMA50/200, 52W High/Low, Market Cap, P/E
+  - LLM verdict badges (BUY/WATCHLIST/HOLD/AVOID) when enrichment enabled
 - **Error Display**: Query validation errors with helpful suggestions
 
 ### Stock Screener Mode (Purple)
 - **Custom Tickers Input**: Enter comma-separated tickers (auto-populated from Query Filter)
 - Configurable capital (₹), max risk %, and top N stocks
+- **LLM Enrichment Toggle**: Enable AI analysis for screened stocks
 - Failed tickers display with expandable details
 - Market overview summary
 - Top 3 conviction picks with reasoning
@@ -1176,7 +1558,7 @@ The dashboard supports **three integrated modes** with seamless transitions:
 - **Dark/Light Theme**: Toggle in header, persists across sessions
 - **Smooth Transitions**: Alpine.js-powered animations between modes
 - **Progress Feedback**: Loading spinners and step indicators for long operations
-- **Cache-Aware**: 5-minute data cache, 10-minute analysis cache
+- **Cache-Aware**: 5-minute data cache, 10-minute analysis cache, 1-hour LLM cache
 - **Real-Time Updates**: Last updated timestamps in header
 
 ---
