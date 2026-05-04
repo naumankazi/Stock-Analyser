@@ -1,0 +1,16 @@
+curl 'http://localhost:8000/api/screen' \
+  -H 'Accept: */*' \
+  -H 'Accept-Language: en-US,en;q=0.9' \
+  -H 'Connection: keep-alive' \
+  -H 'Content-Type: application/json' \
+  -H 'DNT: 1' \
+  -H 'Origin: http://localhost:8000' \
+  -H 'Referer: http://localhost:8000/' \
+  -H 'Sec-Fetch-Dest: empty' \
+  -H 'Sec-Fetch-Mode: cors' \
+  -H 'Sec-Fetch-Site: same-origin' \
+  -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36' \
+  -H 'sec-ch-ua: "Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"' \
+  -H 'sec-ch-ua-mobile: ?0' \
+  -H 'sec-ch-ua-platform: "Windows"' \
+  --data-raw '{"capital":1000000,"max_risk_pct":10,"top_n":15,"custom_tickers":"FEDERALBNK.NS,ADANIPORTS.NS,ABSLAMC.NS,ANANDRATHI.NS,NATCOPHARM.NS,SHRIRAMFIN.NS,CANFINHOME.NS,KARURVYSYA.NS,MUTHOOTFIN.NS,MRPL.NS,BALRAMCHIN.NS,CUB.NS,ONGC.NS,SCI.NS,ATUL.NS,TATASTEEL.NS,RBLBANK.NS,HINDZINC.NS,LTF.NS,WAAREEENER.NS,GESHIP.NS,CANBK.NS,MAHABANK.NS,CHENNPETRO.NS,FINCABLES.NS,ABCAPITAL.NS,DATAPATTNS.NS,BHARATFORG.NS,LLOYDSME.NS,GLENMARK.NS,ASTERDM.NS,MCX.NS,WELCORP.NS,NATIONALUM.NS,SCHNEIDER.NS,BSE.NS,AUBANK.NS,LAURUSLABS.NS,CUMMINSIND.NS,ADANIENSOL.NS,POWERINDIA.NS,CPPLUS.NS,GVT&D.NS,ADANIPOWER.NS,GRAPHITE.NS,DRREDDY.NS,SCHAEFFLER.NS,POLYCAB.NS,ABB.NS,TARIL.NS,HSCL.NS,TRENT.NS,NESTLEIND.NS,OFSS.NS,ELECON.NS,GROWW.NS,IGIL.NS"}'

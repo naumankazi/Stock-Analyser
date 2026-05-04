@@ -1,0 +1,9 @@
+curl 'http://localhost:8000/api/screen' \
+  -H 'sec-ch-ua-platform: "Windows"' \
+  -H 'Referer: http://localhost:8000/' \
+  -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36' \
+  -H 'sec-ch-ua: "Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"' \
+  -H 'DNT: 1' \
+  -H 'Content-Type: application/json' \
+  -H 'sec-ch-ua-mobile: ?0' \
+  --data-raw '{"queries":["Market Capitalization > 500 AND Current price > 1.05 * DMA 200 AND RSI > 50 AND RSI < 70 AND Earnings growth > 10 AND Price to earning < 30","100 * ((52 week high - Current price) / 52 week high) < 5 AND 100 * ((52 week high - Current price) / 52 week high) > 0 AND 100 * (Current price / 52 week low - 1) > 100 AND Current price > 120 AND Volume > 100000","Market Capitalization > 500 AND Return over 3 months > 10 AND Volume 1 week average > 50000 AND ROCE > 15 AND Debt to equity < 1 AND Current price > DMA 50"],"universe":"all_nse","top_n":100}'

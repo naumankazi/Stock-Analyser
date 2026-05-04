@@ -1,0 +1,120 @@
+{
+  "meta": {
+    "symbol": "RRKABEL.NS",
+    "company_name": "R R KABEL LIMITED",
+    "currency": "INR",
+    "currency_symbol": "₹",
+    "analysis_date": "2026-03-03",
+    "data_window_days": 365
+  },
+
+  "price_snapshot": {
+    "current_price": 1531.80,
+    "open": 1525.00,
+    "day_high": 1573.10,
+    "day_low": 1510.00,
+    "prev_close": 1562.60,
+    "change": -30.80,
+    "change_pct": -1.97,
+    "volume": 343674,
+    "market_cap": 173248200704,
+    "distance_from_52w_high_pct": -2.94,
+    "distance_from_52w_low_pct": 18.68
+  },
+
+  "trend_structure": {
+    "primary_trend": "bullish",
+    "daily_trend": "bullish",
+    "weekly_trend": "bullish",
+    "monthly_trend": "neutral",
+    "trend_alignment": "bullish_majority",
+    "sma_positioning": "20>50>100>200",
+    "ma_20": 1458.17,
+    "ma_50": 1455.99,
+    "ma_100": 1404.99,
+    "ma_200": 1354.10,
+    "adx": 28.5,
+    "trend_strength": "strong",
+    "higher_highs_lows": true,
+    "supertrend_signal": "buy"
+  },
+
+  "momentum_signals": {
+    "rsi": 62.73,
+    "rsi_state": "bullish_neutral",
+    "macd_line": 25.2642,
+    "macd_signal_line": 11.1429,
+    "macd_histogram": 14.1213,
+    "macd_state": "bullish",
+    "momentum_acceleration": "increasing"
+  },
+
+  "volume_intelligence": {
+    "current_volume": 343736,
+    "avg_volume_20d": 276149,
+    "volume_ratio": 1.24,
+    "obv_trend": "rising",
+    "accumulation_distribution": "accumulation",
+    "vwap": 1540.35,
+    "price_vs_vwap": "below",
+    "volume_confirmation": true
+  },
+
+  "volatility_risk": {
+    "atr": 42.15,
+    "atr_percent": 2.75,
+    "bollinger_upper": 1548.67,
+    "bollinger_middle": 1458.17,
+    "bollinger_lower": 1367.67,
+    "bollinger_bandwidth": 12.41,
+    "bollinger_position": "upper_half",
+    "volatility_regime": "moderate"
+  },
+
+  "support_resistance": {
+    "support_levels": [1512.03, 1465.80, 1433.06],
+    "resistance_levels": [1561.30],
+    "nearest_support": 1512.03,
+    "nearest_resistance": 1561.30,
+    "fibonacci_levels": {
+      "0.0%": 1578.20,
+      "23.6%": 1510.35,
+      "38.2%": 1468.37,
+      "50.0%": 1434.45,
+      "61.8%": 1400.52,
+      "78.6%": 1352.22,
+      "100.0%": 1290.70
+    },
+    "fibonacci_trend": "uptrend",
+    "patterns_detected": [
+      "Inverse Head & Shoulders (potential)",
+      "Cup & Handle (potential)"
+    ]
+  },
+
+  "derived_signals": {
+    "trend_confirmation": true,
+    "momentum_confirmation": true,
+    "volume_confirmation": true,
+    "risk_environment": "favorable",
+    "trend_maturity": "mid_trend",
+    "crossover_signals": [
+      "50 MA > 100 MA",
+      "50 MA > 200 MA"
+    ]
+  },
+
+  "quant_scores": {
+    "trend_score": 3,
+    "momentum_score": 2,
+    "volume_score": 1,
+    "volatility_score": 0,
+    "composite_score": 6,
+    "max_composite_score": 10,
+    "market_state": "bullish_momentum"
+  },
+
+  "chart_data": [
+    {"time": "2025-03-03", "open": 914.96, "high": 916.85, "low": 850.31, "close": 880.90, "volume": 1181559}
+  ]
+}

@@ -1,0 +1,1552 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Stock Technical Analysis · Report Card</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+    <link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body x-data="app()" x-init="init()">
+
+<!-- ─── TOP NAV ─────────────────────────────────────────── -->
+<nav style="background:var(--bg-secondary);border-bottom:1px solid var(--border)" class="px-6 py-3 flex items-center justify-between sticky top-0 z-50">
+    <div class="flex items-center gap-3">
+        <div style="color:var(--accent-blue)" class="text-xl font-extrabold tracking-tight">◆ StockAnalyzer</div>
+        <div class="flex gap-1 ml-4">
+            <button @click="switchMode('analysis')"
+                    class="px-3 py-1 rounded-md text-xs font-semibold transition"
+                    :style="mode === 'analysis' ? 'background:var(--accent-blue);color:#fff' : 'color:var(--text-secondary)'">
+                Technical Analysis
+            </button>
+            <button @click="switchMode('query')"
+                    class="px-3 py-1 rounded-md text-xs font-semibold transition"
+                    :style="mode === 'query' ? 'background:var(--accent-green);color:#fff' : 'color:var(--text-secondary)'">
+                Query Filter
+            </button>
+            <button @click="switchMode('screener')"
+                    class="px-3 py-1 rounded-md text-xs font-semibold transition"
+                    :style="mode === 'screener' ? 'background:var(--accent-purple);color:#fff' : 'color:var(--text-secondary)'">
+                Stock Screener
+            </button>
+        </div>
+    </div>
+    <div class="flex items-center gap-4">
+        <span x-show="report && mode === 'analysis'" style="color:var(--text-secondary)" class="text-xs" x-text="'Last updated: ' + new Date(report?.generated_at).toLocaleTimeString()"></span>
+        <span x-show="queryReport && mode === 'query'" style="color:var(--text-secondary)" class="text-xs" x-text="'Filtered: ' + new Date(queryReport?.generated_at).toLocaleTimeString()"></span>
+        <span x-show="screenerReport && mode === 'screener'" style="color:var(--text-secondary)" class="text-xs" x-text="'Screened: ' + new Date(screenerReport?.generated_at).toLocaleTimeString()"></span>
+        <button @click="toggleTheme()" style="color:var(--text-secondary)" class="p-2 rounded-lg hover:opacity-80 transition text-xl" x-text="theme === 'dark' ? '☀️' : '🌙'"></button>
+    </div>
+</nav>
+
+<!-- ─── HERO / SEARCH (Analysis Mode) ────────────────────── -->
+<div x-show="mode === 'analysis'" class="max-w-7xl mx-auto px-4 sm:px-6 pt-8 pb-4">
+    <div x-show="!report && !loading" class="text-center py-20">
+        <h1 class="text-4xl sm:text-5xl font-extrabold mb-4" style="background:linear-gradient(135deg,var(--accent-blue),var(--accent-purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent">
+            Technical Analysis Report Card
+        </h1>
+        <p style="color:var(--text-secondary)" class="text-lg mb-10 max-w-xl mx-auto">
+            Enter a stock ticker to generate a comprehensive technical analysis with trade setup, indicators, and pattern detection. Supports US, Indian (NSE/BSE), and global exchanges.
+        </p>
+    </div>
+
+    <!-- Search Bar -->
+    <div class="flex justify-center mb-4">
+        <form @submit.prevent="analyze()" class="flex gap-3 w-full max-w-lg">
+            <input
+                type="text"
+                x-model="ticker"
+                class="input-field flex-1"
+                placeholder="Enter ticker (e.g. AAPL, RELIANCE.NS, TCS.BO)"
+                :disabled="loading"
+                autofocus
+            />
+            <button type="submit" class="btn-primary flex items-center gap-2" :disabled="loading || !ticker.trim()">
+                <span x-show="loading" class="spinner"></span>
+                <span x-text="loading ? 'Analyzing...' : 'Analyze'"></span>
+            </button>
+        </form>
+    </div>
+    <!-- AI Toggle for Analysis Mode -->
+    <div class="flex justify-center mb-6">
+        <div class="flex items-center gap-3">
+            <button type="button" @click="includeLLMAnalysis = !includeLLMAnalysis" 
+                    class="px-3 py-1.5 rounded-md text-xs font-semibold transition flex items-center gap-1"
+                    :style="includeLLMAnalysis ? 'background:var(--accent-purple);color:white' : 'background:var(--bg-secondary);color:var(--text-secondary);border:1px solid var(--border)'">
+                <span x-text="includeLLMAnalysis ? '✓ AI Analysis On' : 'AI Analysis Off'"></span>
+            </button>
+            <span x-show="includeLLMAnalysis" style="color:var(--text-secondary)" class="text-xs">
+                AI will analyze and provide verdict, entry strategy, and risk flags
+            </span>
+        </div>
+    </div>
+    <div class="flex justify-center mb-6">
+        <div class="flex flex-wrap gap-2 text-xs" style="color:var(--text-secondary)">
+            <span>Quick:</span>
+            <button @click="ticker='AAPL'; analyze()" class="hover:underline cursor-pointer" style="color:var(--accent-blue)">AAPL</button>
+            <button @click="ticker='TSLA'; analyze()" class="hover:underline cursor-pointer" style="color:var(--accent-blue)">TSLA</button>
+            <button @click="ticker='MSFT'; analyze()" class="hover:underline cursor-pointer" style="color:var(--accent-blue)">MSFT</button>
+            <span>|</span>
+            <span>India:</span>
+            <button @click="ticker='RELIANCE.NS'; analyze()" class="hover:underline cursor-pointer" style="color:var(--accent-blue)">RELIANCE.NS</button>
+            <button @click="ticker='TCS.NS'; analyze()" class="hover:underline cursor-pointer" style="color:var(--accent-blue)">TCS.NS</button>
+            <button @click="ticker='INFY.NS'; analyze()" class="hover:underline cursor-pointer" style="color:var(--accent-blue)">INFY.NS</button>
+        </div>
+    </div>
+</div>
+
+<!-- ─── QUERY FILTER MODE ────────────────────────────────── -->
+<div x-show="mode === 'query'" class="max-w-7xl mx-auto px-4 sm:px-6 pt-8 pb-4">
+    <div x-show="!queryReport && !queryLoading" class="text-center py-12">
+        <h1 class="text-4xl sm:text-5xl font-extrabold mb-4" style="background:linear-gradient(135deg,var(--accent-green),var(--accent-blue));-webkit-background-clip:text;-webkit-text-fill-color:transparent">
+            Query-Based Stock Filter
+        </h1>
+        <p style="color:var(--text-secondary)" class="text-lg mb-6 max-w-2xl mx-auto">
+            Filter stocks using Screener.in-style queries. Combine technical indicators, fundamentals, and price conditions to find stocks matching your criteria.
+        </p>
+    </div>
+
+    <!-- Query Input Form -->
+    <div class="flex justify-center mb-6">
+        <form @submit.prevent="runQuery()" class="w-full max-w-4xl">
+            <!-- Mode Toggle -->
+            <div class="flex items-center justify-between mb-3">
+                <label style="color:var(--text-secondary)" class="text-xs block" x-text="queryMultiMode ? 'Multiple Queries (one per line)' : 'Single Query'"></label>
+                <button type="button" @click="queryMultiMode = !queryMultiMode" class="text-xs px-3 py-1 rounded transition-all" 
+                        :style="queryMultiMode ? 'background:var(--accent-purple);color:white' : 'background:var(--bg-secondary);color:var(--text-secondary);border:1px solid var(--border)'">
+                    <span x-text="queryMultiMode ? '✓ Multi-Query Mode' : 'Switch to Multi-Query'"></span>
+                </button>
+            </div>
+            <div class="mb-4">
+                <textarea x-model="queryText" :rows="queryMultiMode ? 6 : 3" class="input-field w-full font-mono text-sm" 
+                    :placeholder="queryMultiMode ? 'Enter multiple queries, one per line:\nRSI > 50 AND RSI < 70\nCurrent price > 1.05 * DMA 200\nPrice to earning < 30 AND Market Capitalization > 1000' : 'e.g. Market Capitalization > 500 AND Current price > 1.05 * DMA 200 AND RSI > 50 AND RSI < 70'" 
+                    :disabled="queryLoading"></textarea>
+                <p x-show="queryMultiMode" class="text-xs mt-1" style="color:var(--text-secondary)">
+                    💡 Stocks matching multiple queries will be prioritized and highlighted as "duplicates"
+                </p>
+            </div>
+
+            <div class="mb-4">
+                <p style="color:var(--text-secondary)" class="text-xs mb-2" x-text="queryMultiMode ? 'Example Queries (click to add/remove):' : 'Example Queries (click to use):'"></p>
+                <div class="flex flex-wrap gap-2">
+                    <button type="button" @click="toggleExampleQuery('Market Capitalization > 500 AND Current price > 1.05 * DMA 200 AND RSI > 50 AND RSI < 70 AND Earnings growth > 10 AND Price to earning < 30')" 
+                            class="text-xs px-2 py-1 rounded transition-all"
+                            :style="isQueryActive('Market Capitalization > 500 AND Current price > 1.05 * DMA 200 AND RSI > 50 AND RSI < 70 AND Earnings growth > 10 AND Price to earning < 30') ? 'background:var(--accent-green);color:white;border:1px solid var(--accent-green)' : 'background:var(--bg-secondary);color:var(--accent-green);border:1px solid var(--border)'">
+                        Growth Momentum
+                    </button>
+                    <button type="button" @click="toggleExampleQuery('100 * ((52 week high - Current price) / 52 week high) < 5 AND 100 * ((52 week high - Current price) / 52 week high) > 0 AND 100 * (Current price / 52 week low - 1) > 100 AND Current price > 120 AND Volume > 100000')" 
+                            class="text-xs px-2 py-1 rounded transition-all"
+                            :style="isQueryActive('100 * ((52 week high - Current price) / 52 week high) < 5 AND 100 * ((52 week high - Current price) / 52 week high) > 0 AND 100 * (Current price / 52 week low - 1) > 100 AND Current price > 120 AND Volume > 100000') ? 'background:var(--accent-green);color:white;border:1px solid var(--accent-green)' : 'background:var(--bg-secondary);color:var(--accent-green);border:1px solid var(--border)'">
+                        Near 52-Week High
+                    </button>
+                    <button type="button" @click="toggleExampleQuery('Market Capitalization > 500 AND Return over 3 months > 10 AND Volume 1 week average > 50000 AND ROCE > 15 AND Debt to equity < 1 AND Current price > DMA 50')" 
+                            class="text-xs px-2 py-1 rounded transition-all"
+                            :style="isQueryActive('Market Capitalization > 500 AND Return over 3 months > 10 AND Volume 1 week average > 50000 AND ROCE > 15 AND Debt to equity < 1 AND Current price > DMA 50') ? 'background:var(--accent-green);color:white;border:1px solid var(--accent-green)' : 'background:var(--bg-secondary);color:var(--accent-green);border:1px solid var(--border)'">
+                        Quality + Momentum
+                    </button>
+                    <button type="button" @click="toggleExampleQuery('RSI < 35 AND Current price < DMA 200 AND Market Capitalization > 1000')" 
+                            class="text-xs px-2 py-1 rounded transition-all"
+                            :style="isQueryActive('RSI < 35 AND Current price < DMA 200 AND Market Capitalization > 1000') ? 'background:var(--accent-green);color:white;border:1px solid var(--accent-green)' : 'background:var(--bg-secondary);color:var(--accent-green);border:1px solid var(--border)'">
+                        Oversold Large Caps
+                    </button>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                <div>
+                    <label style="color:var(--text-secondary)" class="text-xs block mb-1">Stock Universe</label>
+                    <select x-model="queryUniverse" class="input-field w-full" :disabled="queryLoading || screenerUrls.trim()">
+                        <option value="all_nse">All NSE / F&O (~500 stocks)</option>
+                        <option value="nifty500">Nifty 500</option>
+                        <option value="nifty200">Nifty 200</option>
+                        <option value="nifty100">Nifty 100 (Default)</option>
+                        <option value="nifty50">Nifty 50</option>
+                        <option value="shariah_38">Shariah-38</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="color:var(--text-secondary)" class="text-xs block mb-1">Max Results</label>
+                    <input type="number" x-model.number="queryTopN" class="input-field w-full" min="10" max="200" :disabled="queryLoading" />
+                </div>
+                <div>
+                    <label style="color:var(--text-secondary)" class="text-xs block mb-1">LLM Analysis</label>
+                    <div class="flex items-center gap-2 h-10">
+                        <button type="button" @click="includeLLM = !includeLLM" 
+                                class="px-3 py-1.5 rounded text-xs font-semibold transition-all flex items-center gap-1"
+                                :style="includeLLM ? 'background:var(--accent-purple);color:white' : 'background:var(--bg-secondary);color:var(--text-secondary);border:1px solid var(--border)'">
+                            <span x-text="includeLLM ? '✓ AI On' : 'AI Off'"></span>
+                        </button>
+                        <input x-show="includeLLM" type="number" x-model.number="llmMaxStocks" 
+                               class="input-field w-16 text-xs" min="1" max="30" 
+                               title="Max stocks for LLM analysis" :disabled="queryLoading" />
+                    </div>
+                </div>
+                <div class="flex items-end">
+                    <button type="submit" class="btn-primary w-full flex items-center justify-center gap-2" style="background:var(--accent-green)" :disabled="queryLoading || (!queryText.trim() && !screenerUrls.trim())">
+                        <span x-show="queryLoading" class="spinner"></span>
+                        <span x-text="queryLoading ? 'Filtering...' : 'Run Filter'"></span>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Screener.in URL Input -->
+            <div class="mb-4 p-3 rounded-lg" style="background:var(--bg-secondary);border:1px dashed var(--border)">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2">
+                        <span style="color:var(--accent-blue)" class="text-sm font-semibold">📊 Import from Screener.in</span>
+                        <span style="color:var(--text-secondary)" class="text-xs">(Optional - overrides Stock Universe)</span>
+                    </div>
+                    <button type="button" @click="screenerUrls = ''" 
+                            x-show="screenerUrls.trim()" 
+                            class="px-3 py-1 rounded text-xs font-semibold transition"
+                            style="background:var(--accent-red);color:white">
+                        Clear All
+                    </button>
+                </div>
+                <textarea x-model="screenerUrls" 
+                          rows="2"
+                          class="input-field w-full text-sm font-mono" 
+                          placeholder="Paste Screener.in screen URLs (one per line):
+https://www.screener.in/screens/71/
+https://www.screener.in/screens/3625029/strength-with-volume/" 
+                          :disabled="queryLoading"></textarea>
+                <div x-show="screenerUrls.trim()" class="flex items-center gap-2 mt-2">
+                    <span class="text-xs" style="color:var(--accent-green)">
+                        ✓ <span x-text="screenerUrls.split(/\r?\n/).filter(u => u.trim()).length"></span> URL(s) will be fetched - stocks combined and deduplicated
+                    </span>
+                </div>
+                <div class="mt-3">
+                    <p style="color:var(--text-secondary)" class="text-xs mb-2">Quick Add Screens (click to add/remove):</p>
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" @click="toggleScreenerUrl('https://www.screener.in/screens/3625024/52w-high/')" 
+                                class="text-xs px-2 py-1 rounded transition-all"
+                                :style="isScreenerUrlActive('https://www.screener.in/screens/3625024/52w-high/') ? 'background:var(--accent-blue);color:white;border:1px solid var(--accent-blue)' : 'background:var(--bg-secondary);color:var(--accent-blue);border:1px solid var(--border)'">
+                            📈 52W High
+                        </button>
+                        <button type="button" @click="toggleScreenerUrl('https://www.screener.in/screens/3625029/strength-with-volume/')" 
+                                class="text-xs px-2 py-1 rounded transition-all"
+                                :style="isScreenerUrlActive('https://www.screener.in/screens/3625029/strength-with-volume/') ? 'background:var(--accent-blue);color:white;border:1px solid var(--accent-blue)' : 'background:var(--bg-secondary);color:var(--accent-blue);border:1px solid var(--border)'">
+                            💪 Strength + Volume
+                        </button>
+                        <button type="button" @click="toggleScreenerUrl('https://www.screener.in/screens/3627689/breakout/')" 
+                                class="text-xs px-2 py-1 rounded transition-all"
+                                :style="isScreenerUrlActive('https://www.screener.in/screens/3627689/breakout/') ? 'background:var(--accent-blue);color:white;border:1px solid var(--accent-blue)' : 'background:var(--bg-secondary);color:var(--accent-blue);border:1px solid var(--border)'">
+                            🚀 Breakout
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Available Fields -->
+            <details class="mb-4">
+                <summary style="color:var(--text-secondary)" class="text-xs cursor-pointer hover:opacity-80">Available Fields & Operators</summary>
+                <div class="mt-2 p-3 rounded text-xs" style="background:var(--bg-secondary)">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <p class="font-semibold mb-1" style="color:var(--accent-blue)">Price & Moving Averages</p>
+                            <p style="color:var(--text-secondary)">Current price, Close, Open, High, Low, 52 week high, 52 week low, DMA 50, DMA 200, SMA 50, SMA 200</p>
+                        </div>
+                        <div>
+                            <p class="font-semibold mb-1" style="color:var(--accent-green)">Technical Indicators</p>
+                            <p style="color:var(--text-secondary)">RSI, Volume, Volume 1 week average, Return over 3 months</p>
+                        </div>
+                        <div>
+                            <p class="font-semibold mb-1" style="color:var(--accent-purple)">Fundamentals</p>
+                            <p style="color:var(--text-secondary)">Market Capitalization, Price to earning, PEG ratio, Debt to equity, ROE, ROCE, Operating margin, Revenue growth, Earnings growth</p>
+                        </div>
+                    </div>
+                    <p class="mt-2" style="color:var(--text-secondary)"><strong>Operators:</strong> >, <, >=, <=, =, != &nbsp;&nbsp; <strong>Arithmetic:</strong> +, -, *, /, () &nbsp;&nbsp; <strong>Logic:</strong> AND</p>
+                </div>
+            </details>
+        </form>
+    </div>
+</div>
+
+<!-- ─── QUERY LOADING ─────────────────────────────────────── -->
+<div x-show="queryLoading && mode === 'query'" class="max-w-7xl mx-auto px-4 sm:px-6 pb-20">
+    <div class="text-center py-8">
+        <div class="spinner mx-auto mb-4" style="width:40px;height:40px;border-width:3px"></div>
+        <p style="color:var(--text-secondary)" class="text-lg">Filtering stocks across <strong x-text="queryUniverse.replace('_', ' ').toUpperCase()"></strong>...</p>
+        <p style="color:var(--text-secondary)" class="text-sm mt-2">This may take a minute — fetching and analyzing data for hundreds of stocks</p>
+        <div class="mt-6 max-w-md mx-auto">
+            <div class="progress-track">
+                <div class="progress-fill" style="background:var(--accent-green);width:30%" x-ref="queryProgressBar"></div>
+            </div>
+            <p style="color:var(--text-secondary)" class="text-sm mt-2" x-text="queryStep"></p>
+        </div>
+    </div>
+</div>
+
+<!-- ─── QUERY ERROR ───────────────────────────────────────── -->
+<div x-show="queryError && mode === 'query'" class="max-w-7xl mx-auto px-4 sm:px-6">
+    <div class="card flex items-center gap-4 mb-6" style="border-color:var(--accent-red)">
+        <span class="text-3xl">⚠️</span>
+        <div>
+            <p class="font-semibold">Query Failed</p>
+            <p style="color:var(--text-secondary)" x-text="queryError"></p>
+        </div>
+        <button @click="queryError=null" class="ml-auto btn-primary" style="background:var(--accent-red);padding:8px 16px;font-size:13px">Dismiss</button>
+    </div>
+</div>
+
+<!-- ─── QUERY RESULTS ──────────────────────────────────────── -->
+<div x-show="queryReport && mode === 'query'" x-transition class="max-w-7xl mx-auto px-4 sm:px-6 pb-20">
+
+    <!-- Summary Card -->
+    <div class="card mb-6 fade-in-up" style="border-color:var(--accent-green)">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+            <div>
+                <div class="section-title" style="color:var(--accent-green)">Filter Results</div>
+                <p style="color:var(--text-secondary)" class="text-sm">
+                    <strong x-text="queryReport?.matched_tickers?.length || 0"></strong> stocks matched out of 
+                    <strong x-text="queryReport?.total_screened || 0"></strong> screened
+                </p>
+            </div>
+            <div class="flex gap-2">
+                <button @click="useInScreener()" 
+                        class="btn-primary flex items-center gap-2" 
+                        style="background:var(--accent-purple)"
+                        :disabled="!queryReport?.matched_tickers?.length">
+                    <span>Use in Screener →</span>
+                </button>
+                <button @click="queryReport=null" 
+                        class="px-4 py-2 rounded-lg text-sm font-semibold transition"
+                        style="background:var(--bg-secondary);color:var(--text-secondary);border:1px solid var(--border)">
+                    New Query
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Multi-Query: Duplicates (stocks in multiple queries) -->
+    <div x-show="queryReport?.duplicates?.length > 0" class="card mb-6 fade-in-up" style="border-color:var(--accent-purple)">
+        <div class="section-title" style="color:var(--accent-purple)">
+            ⭐ High-Conviction Picks (matched multiple queries)
+        </div>
+        <p style="color:var(--text-secondary)" class="text-sm mb-3">
+            These <strong x-text="queryReport?.duplicates?.length || 0"></strong> stocks matched 2 or more of your queries — consider prioritizing these.
+        </p>
+        <div class="flex flex-wrap gap-2">
+            <template x-for="t in queryReport?.duplicates" :key="t">
+                <button @click="analyzeFromResults(t, includeLLM)"
+                        class="px-3 py-1.5 rounded-md text-sm font-semibold transition hover:opacity-80"
+                        style="background:var(--accent-purple);color:#fff"
+                        x-text="t.replace('.NS', '')">
+                </button>
+            </template>
+        </div>
+    </div>
+
+    <!-- Multi-Query: Query Breakdown -->
+    <div x-show="queryReport?.query_breakdown && Object.keys(queryReport?.query_breakdown || {}).length > 0" class="card mb-6 fade-in-up" style="border-color:var(--accent-blue)">
+        <div class="section-title" style="color:var(--accent-blue)">Query Breakdown</div>
+        <div class="space-y-3">
+            <template x-for="(entry, idx) in Object.entries(queryReport?.query_breakdown || {})" :key="idx">
+                <div class="p-3 rounded" style="background:var(--bg-secondary)">
+                    <div class="flex justify-between items-start mb-2">
+                        <span class="text-xs font-mono px-2 py-0.5 rounded" style="background:var(--accent-blue);color:#fff" x-text="'Query ' + (idx + 1)"></span>
+                        <span class="text-xs font-bold" style="color:var(--accent-green)" x-text="entry[1].length + ' matches'"></span>
+                    </div>
+                    <p class="text-sm font-mono mb-2" style="color:var(--text-primary)" x-text="entry[0]"></p>
+                    <div class="flex flex-wrap gap-1">
+                        <template x-for="t in entry[1].slice(0, 20)" :key="t">
+                            <span class="text-[10px] px-1.5 py-0.5 rounded" style="background:var(--bg-tertiary);color:var(--text-secondary)" x-text="t.replace('.NS', '')"></span>
+                        </template>
+                        <span x-show="entry[1].length > 20" class="text-[10px] px-1.5 py-0.5 rounded" style="color:var(--text-secondary)" x-text="'+ ' + (entry[1].length - 20) + ' more'"></span>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Validation Errors (if any) -->
+    <div x-show="queryReport?.errors?.length > 0" class="card mb-6 fade-in-up" style="border-color:var(--accent-red)">
+        <div class="section-title" style="color:var(--accent-red)">Query Errors</div>
+        <ul class="text-sm space-y-1" style="color:var(--text-secondary)">
+            <template x-for="err in queryReport?.errors">
+                <li x-text="'• ' + err"></li>
+            </template>
+        </ul>
+    </div>
+
+    <!-- Matched Tickers Grid -->
+    <div class="card mb-6 fade-in-up" style="animation-delay:0.1s">
+        <div class="section-title">Matched Stocks (<span x-text="queryReport?.matched_tickers?.length || 0"></span>)</div>
+        <div class="flex flex-wrap gap-2 mb-4">
+            <template x-for="t in queryReport?.matched_tickers" :key="t">
+                <button @click="analyzeFromResults(t, includeLLM)"
+                        class="px-3 py-1.5 rounded-md text-sm font-semibold transition hover:opacity-80"
+                        style="background:var(--accent-green);color:#fff"
+                        x-text="t.replace('.NS', '')">
+                </button>
+            </template>
+        </div>
+        <p style="color:var(--text-secondary)" class="text-xs">Click any ticker to run technical analysis</p>
+    </div>
+
+    <!-- Stock Details Table -->
+    <div x-show="queryReport?.stock_details?.length > 0" class="card mb-6 fade-in-up" style="animation-delay:0.15s">
+        <div class="section-title">Stock Details</div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-xs">
+                <thead>
+                    <tr style="border-bottom:2px solid var(--border)">
+                        <th class="text-left py-2 px-2">#</th>
+                        <th class="text-left py-2 px-2">Ticker</th>
+                        <th class="text-right py-2 px-2">Price</th>
+                        <th class="text-right py-2 px-2">RSI</th>
+                        <th class="text-right py-2 px-2">vs DMA50</th>
+                        <th class="text-right py-2 px-2">vs DMA200</th>
+                        <th class="text-right py-2 px-2">52W High</th>
+                        <th class="text-right py-2 px-2">52W Low</th>
+                        <th class="text-right py-2 px-2">Mkt Cap (Cr)</th>
+                        <th class="text-right py-2 px-2">P/E</th>
+                        <th class="text-center py-2 px-2">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="(s, idx) in queryReport?.stock_details" :key="s.ticker">
+                        <tr style="border-bottom:1px solid var(--border)" class="hover:opacity-80">
+                            <td class="py-2 px-2 font-mono" x-text="idx + 1"></td>
+                            <td class="py-2 px-2 font-bold" style="color:var(--accent-green)" x-text="s.ticker"></td>
+                            <td class="py-2 px-2 text-right font-mono" x-text="'₹' + (s.close?.toFixed(2) || '—')"></td>
+                            <td class="py-2 px-2 text-right font-mono"
+                                :style="s.rsi < 30 ? 'color:var(--accent-green)' : s.rsi > 70 ? 'color:var(--accent-red)' : ''"
+                                x-text="s.rsi?.toFixed(1) || '—'"></td>
+                            <td class="py-2 px-2 text-right font-mono"
+                                :style="s.close > s.sma_50 ? 'color:var(--accent-green)' : 'color:var(--accent-red)'"
+                                x-text="s.sma_50 ? ((s.close / s.sma_50 - 1) * 100).toFixed(1) + '%' : '—'"></td>
+                            <td class="py-2 px-2 text-right font-mono"
+                                :style="s.close > s.sma_200 ? 'color:var(--accent-green)' : 'color:var(--accent-red)'"
+                                x-text="s.sma_200 ? ((s.close / s.sma_200 - 1) * 100).toFixed(1) + '%' : '—'"></td>
+                            <td class="py-2 px-2 text-right font-mono" x-text="'₹' + (s.high_52w?.toFixed(2) || '—')"></td>
+                            <td class="py-2 px-2 text-right font-mono" x-text="'₹' + (s.low_52w?.toFixed(2) || '—')"></td>
+                            <td class="py-2 px-2 text-right font-mono" x-text="s.market_cap?.toFixed(0) || '—'"></td>
+                            <td class="py-2 px-2 text-right font-mono" x-text="s.pe_ratio?.toFixed(1) || '—'"></td>
+                            <td class="py-2 px-2 text-center">
+                                <button @click="analyzeFromResults(s.ticker, includeLLM)"
+                                        class="text-[10px] px-2 py-1 rounded font-semibold"
+                                        style="background:var(--accent-blue);color:#fff">Analyze</button>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- LLM Enrichment Summary (only shown when LLM enriched data is present) -->
+    <div x-show="queryReport?.llm_enriched?.length > 0" class="card mb-6 fade-in-up" style="border-color:var(--accent-purple);animation-delay:0.2s">
+        <div class="flex items-center justify-between mb-4">
+            <div class="section-title flex items-center gap-2">
+                <span style="color:var(--accent-purple)">🤖</span> AI Analysis Summary
+            </div>
+            <div class="flex items-center gap-3 text-xs" style="color:var(--text-secondary)">
+                <span>Analyzed: <strong x-text="queryReport?.llm_summary?.total_enriched || 0"></strong> stocks</span>
+                <span x-show="queryReport?.llm_summary?.cached > 0">(<span x-text="queryReport?.llm_summary?.cached"></span> cached)</span>
+            </div>
+        </div>
+        
+        <!-- Verdict Distribution -->
+        <div x-show="queryReport?.llm_summary?.verdicts && Object.keys(queryReport?.llm_summary?.verdicts || {}).length > 0" class="flex flex-wrap gap-2 mb-4">
+            <template x-for="[verdict, count] in Object.entries(queryReport?.llm_summary?.verdicts || {})" :key="verdict">
+                <span class="px-3 py-1 rounded-full text-xs font-bold"
+                      :style="verdict === 'BUY' ? 'background:var(--accent-green);color:#fff' :
+                              verdict === 'WATCHLIST' ? 'background:var(--accent-blue);color:#fff' :
+                              verdict === 'HOLD' ? 'background:var(--accent-yellow);color:#000' :
+                              'background:var(--accent-red);color:#fff'"
+                      x-text="verdict + ': ' + count"></span>
+            </template>
+        </div>
+        
+        <!-- Stage Distribution -->
+        <div x-show="queryReport?.llm_summary?.stages && Object.keys(queryReport?.llm_summary?.stages || {}).length > 0" class="flex flex-wrap gap-2">
+            <template x-for="[stage, count] in Object.entries(queryReport?.llm_summary?.stages || {})" :key="stage">
+                <span class="px-2 py-1 rounded text-xs" style="background:var(--bg-secondary);color:var(--text-secondary)"
+                      x-text="stage.replace(/_/g, ' ') + ': ' + count"></span>
+            </template>
+        </div>
+    </div>
+
+    <!-- LLM Enriched Stock Cards -->
+    <div x-show="queryReport?.llm_enriched?.length > 0" class="mb-6">
+        <div class="section-title mb-4">AI-Analyzed Stocks (<span x-text="queryReport?.llm_enriched?.length || 0"></span>)</div>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <template x-for="stock in queryReport?.llm_enriched || []" :key="stock.stock">
+                <div class="card fade-in-up" 
+                     :style="stock.llm?.verdict === 'BUY' ? 'border-left:4px solid var(--accent-green)' :
+                             stock.llm?.verdict === 'WATCHLIST' ? 'border-left:4px solid var(--accent-blue)' :
+                             stock.llm?.verdict === 'HOLD' ? 'border-left:4px solid var(--accent-yellow)' :
+                             stock.llm?.verdict === 'AVOID' ? 'border-left:4px solid var(--accent-red)' :
+                             'border-left:4px solid var(--border)'">
+                    
+                    <!-- Header -->
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-2">
+                            <button @click="analyzeFromResults(stock.stock, true)"
+                                    class="font-bold text-lg hover:opacity-80 transition" style="color:var(--accent-blue)"
+                                    x-text="stock.stock?.replace('.NS', '')"></button>
+                            <!-- Tags -->
+                            <template x-for="tag in (stock.tags || []).slice(0, 2)" :key="tag">
+                                <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold"
+                                      :style="tag === 'duplicate' ? 'background:var(--accent-purple);color:#fff' :
+                                              tag === 'breakout' ? 'background:var(--accent-green);color:#fff' :
+                                              tag === 'momentum' ? 'background:var(--accent-blue);color:#fff' :
+                                              'background:var(--bg-secondary);color:var(--text-secondary)'"
+                                      x-text="tag"></span>
+                            </template>
+                        </div>
+                        <div x-show="stock.llm">
+                            <span class="px-2 py-1 rounded text-xs font-bold"
+                                  :style="stock.llm?.verdict === 'BUY' ? 'background:var(--accent-green);color:#fff' :
+                                          stock.llm?.verdict === 'WATCHLIST' ? 'background:var(--accent-blue);color:#fff' :
+                                          stock.llm?.verdict === 'HOLD' ? 'background:var(--accent-yellow);color:#000' :
+                                          'background:var(--accent-red);color:#fff'"
+                                  x-text="stock.llm?.verdict"></span>
+                        </div>
+                    </div>
+                    
+                    <!-- No LLM Message -->
+                    <div x-show="!stock.llm" class="text-xs" style="color:var(--text-secondary)">
+                        AI analysis not available for this stock
+                    </div>
+                    
+                    <!-- LLM Content -->
+                    <div x-show="stock.llm" class="text-sm">
+                        <!-- Confidence & Stage -->
+                        <div class="flex items-center justify-between mb-2 text-xs" style="color:var(--text-secondary)">
+                            <span>Confidence: <strong style="color:var(--text-primary)" x-text="((stock.llm?.confidence || 0) * 100).toFixed(0) + '%'"></strong></span>
+                            <span class="px-1.5 py-0.5 rounded" style="background:var(--bg-secondary)" x-text="stock.llm?.stage?.replace(/_/g, ' ')"></span>
+                        </div>
+                        
+                        <!-- Thesis (first 2 points) -->
+                        <div class="mb-2">
+                            <template x-for="(point, idx) in (stock.llm?.thesis || []).slice(0, 2)" :key="idx">
+                                <div class="flex items-start gap-1 text-xs mb-1">
+                                    <span style="color:var(--accent-green)">•</span>
+                                    <span x-text="point"></span>
+                                </div>
+                            </template>
+                        </div>
+                        
+                        <!-- Entry Strategy -->
+                        <div class="grid grid-cols-2 gap-2 text-xs pt-2" style="border-top:1px solid var(--border)">
+                            <div>
+                                <span style="color:var(--text-secondary)">Entry:</span>
+                                <span class="ml-1" x-text="stock.llm?.entry_strategy?.trigger || '—'"></span>
+                            </div>
+                            <div>
+                                <span style="color:var(--text-secondary)">Zone:</span>
+                                <span class="ml-1" x-text="stock.llm?.entry_strategy?.zone || '—'"></span>
+                            </div>
+                        </div>
+                        
+                        <!-- Risk Flags -->
+                        <div x-show="stock.llm?.risk_flags?.length > 0" class="mt-2 pt-2" style="border-top:1px solid var(--border)">
+                            <div class="flex flex-wrap gap-1">
+                                <template x-for="flag in (stock.llm?.risk_flags || []).slice(0, 2)" :key="flag">
+                                    <span class="px-1.5 py-0.5 rounded text-[10px]" style="background:rgba(239,68,68,0.15);color:var(--accent-red)" x-text="flag"></span>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+</div>
+
+<!-- ─── SCREENER MODE ────────────────────────────────────── -->
+<div x-show="mode === 'screener'" class="max-w-7xl mx-auto px-4 sm:px-6 pt-8 pb-4">
+    <div x-show="!screenerReport && !screenerLoading" class="text-center py-20">
+        <h1 class="text-4xl sm:text-5xl font-extrabold mb-4" style="background:linear-gradient(135deg,var(--accent-purple),var(--accent-blue));-webkit-background-clip:text;-webkit-text-fill-color:transparent">
+            Shariah-Compliant Stock Screener
+        </h1>
+        <p style="color:var(--text-secondary)" class="text-lg mb-6 max-w-xl mx-auto">
+            Multi-factor screening across Indian equities — valuation, growth, financial health, competitive moat, technical momentum, and risk management.
+        </p>
+    </div>
+
+    <!-- Screener Controls -->
+    <div class="flex justify-center mb-6">
+        <form @submit.prevent="runScreener()" class="w-full max-w-4xl">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label style="color:var(--text-secondary)" class="text-xs block mb-1">Custom Tickers (Optional)</label>
+                    <input type="text" x-model="screenerCustomTickers" class="input-field w-full" placeholder="e.g. TCS.NS,INFY.NS,HCLTECH.NS or TCS,INFY,HCLTECH" :disabled="screenerLoading" title="Leave empty to screen default universe" />
+                    <p style="color:var(--text-secondary)" class="text-xs mt-1">Leave empty to screen default Shariah-compliant universe</p>
+                </div>
+                <div class="grid grid-cols-3 gap-2">
+                    <div>
+                        <label style="color:var(--text-secondary)" class="text-xs block mb-1">Capital (₹)</label>
+                        <input type="number" x-model.number="screenerCapital" class="input-field w-full" min="10000" step="10000" :disabled="screenerLoading" />
+                    </div>
+                    <div>
+                        <label style="color:var(--text-secondary)" class="text-xs block mb-1">Max Risk %</label>
+                        <input type="number" x-model.number="screenerRisk" class="input-field w-full" min="1" max="15" step="0.5" :disabled="screenerLoading" />
+                    </div>
+                    <div>
+                        <label style="color:var(--text-secondary)" class="text-xs block mb-1">Top N</label>
+                        <input type="number" x-model.number="screenerTopN" class="input-field w-full" min="5" max="30" :disabled="screenerLoading" />
+                    </div>
+                </div>
+            </div>
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-3">
+                    <button type="button" @click="screenerIncludeLLM = !screenerIncludeLLM" 
+                            class="px-3 py-1.5 rounded text-xs font-semibold transition-all flex items-center gap-1"
+                            :style="screenerIncludeLLM ? 'background:var(--accent-purple);color:white' : 'background:var(--bg-secondary);color:var(--text-secondary);border:1px solid var(--border)'">
+                        <span x-text="screenerIncludeLLM ? '✓ AI Analysis On' : 'AI Analysis Off'"></span>
+                    </button>
+                    <input x-show="screenerIncludeLLM" type="number" x-model.number="screenerLLMMaxStocks" 
+                           class="input-field w-16 text-xs" min="1" max="20" 
+                           title="Max stocks for LLM analysis" :disabled="screenerLoading" />
+                    <span x-show="screenerIncludeLLM" style="color:var(--text-secondary)" class="text-xs">
+                        AI will analyze top stocks with verdict & entry strategy
+                    </span>
+                </div>
+            </div>
+            <div class="flex justify-center">
+                <button type="submit" class="btn-primary flex items-center gap-2" style="background:var(--accent-purple)" :disabled="screenerLoading">
+                    <span x-show="screenerLoading" class="spinner"></span>
+                    <span x-text="screenerLoading ? 'Screening...' : 'Run Screener'"></span>
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Failed Tickers Section -->
+    <div x-show="failedTickers.length > 0 && showFailedTickers" class="max-w-4xl mx-auto mb-6">
+        <div class="card" style="border-color:var(--accent-red);background:rgba(255,107,107,0.05)">
+            <button @click="showFailedTickers=!showFailedTickers" class="w-full flex items-center justify-between p-4 cursor-pointer">
+                <div class="flex items-center gap-2">
+                    <span class="text-xl">⚠️</span>
+                    <div class="text-left">
+                        <p class="font-semibold" style="color:var(--accent-red)" x-text="failedTickers.length + ' ticker(s) could not be found'"></p>
+                        <p style="color:var(--text-secondary)" class="text-xs">Click to expand and see details</p>
+                    </div>
+                </div>
+                <span class="text-lg" x-text="showFailedTickers ? '▼' : '▶'"></span>
+            </button>
+            <div x-show="showFailedTickers" class="px-4 pb-4 pt-0">
+                <div class="bg-opacity-50 rounded p-3 text-sm" style="background:var(--bg-secondary)">
+                    <p style="color:var(--text-secondary)" class="mb-2">These tickers returned 404 errors and were skipped:</p>
+                    <div class="flex flex-wrap gap-2">
+                        <template x-for="ticker in failedTickers">
+                            <span class="px-2 py-1 rounded text-xs font-mono" style="background:var(--accent-red);color:#fff" x-text="ticker"></span>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ─── SCREENER LOADING ─────────────────────────────────── -->
+<div x-show="screenerLoading && mode === 'screener'" class="max-w-7xl mx-auto px-4 sm:px-6 pb-20">
+    <div class="text-center py-8">
+        <div class="spinner mx-auto mb-4" style="width:40px;height:40px;border-width:3px"></div>
+        <p style="color:var(--text-secondary)" class="text-lg">Screening stocks across <strong>Indian markets</strong>...</p>
+        <p style="color:var(--text-secondary)" class="text-sm mt-2">This may take a minute — analyzing fundamentals and technicals for 35+ stocks</p>
+        <div class="mt-6 max-w-md mx-auto">
+            <div class="progress-track">
+                <div class="progress-fill" style="background:var(--accent-purple);width:30%" x-ref="screenerProgressBar"></div>
+            </div>
+            <p style="color:var(--text-secondary)" class="text-sm mt-2" x-text="screenerStep"></p>
+        </div>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+        <template x-for="i in 6"><div class="skeleton h-40 rounded-xl"></div></template>
+    </div>
+</div>
+
+<!-- ─── SCREENER ERROR ───────────────────────────────────── -->
+<div x-show="screenerError && mode === 'screener'" class="max-w-7xl mx-auto px-4 sm:px-6">
+    <div class="card flex items-center gap-4 mb-6" style="border-color:var(--accent-red)">
+        <span class="text-3xl">⚠️</span>
+        <div>
+            <p class="font-semibold">Screening Failed</p>
+            <p style="color:var(--text-secondary)" x-text="screenerError"></p>
+        </div>
+        <button @click="screenerError=null" class="ml-auto btn-primary" style="background:var(--accent-red);padding:8px 16px;font-size:13px">Dismiss</button>
+    </div>
+</div>
+
+<!-- ─── SCREENER REPORT ──────────────────────────────────── -->
+<div x-show="screenerReport && mode === 'screener'" x-transition class="max-w-7xl mx-auto px-4 sm:px-6 pb-20">
+
+    <!-- Summary Card (for query-based screening with LLM) -->
+    <div x-show="screenerReport?.mode" class="card mb-6 fade-in-up" style="border-color:var(--accent-purple)">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+            <div>
+                <div class="section-title" style="color:var(--accent-purple)">Screener Results</div>
+                <p style="color:var(--text-secondary)" class="text-sm">
+                    <strong x-text="screenerReport?.matched_tickers?.length || 0"></strong> stocks matched out of 
+                    <strong x-text="screenerReport?.total_screened || 0"></strong> screened
+                </p>
+            </div>
+            <button @click="screenerReport=null" 
+                    class="px-4 py-2 rounded-lg text-sm font-semibold transition"
+                    style="background:var(--bg-secondary);color:var(--text-secondary);border:1px solid var(--border)">
+                New Screen
+            </button>
+        </div>
+    </div>
+
+    <!-- LLM Enrichment Summary (for query-based screening with LLM) -->
+    <div x-show="screenerReport?.llm_enriched?.length > 0" class="card mb-6 fade-in-up" style="border-color:var(--accent-purple);animation-delay:0.1s">
+        <div class="flex items-center justify-between mb-4">
+            <div class="section-title flex items-center gap-2">
+                <span style="color:var(--accent-purple)">🤖</span> AI Analysis Summary
+            </div>
+            <div class="flex items-center gap-3 text-xs" style="color:var(--text-secondary)">
+                <span>Analyzed: <strong x-text="screenerReport?.llm_summary?.total_enriched || 0"></strong> stocks</span>
+            </div>
+        </div>
+        
+        <!-- Verdict Distribution -->
+        <div x-show="screenerReport?.llm_summary?.verdicts && Object.keys(screenerReport?.llm_summary?.verdicts || {}).length > 0" class="flex flex-wrap gap-2 mb-4">
+            <template x-for="[verdict, count] in Object.entries(screenerReport?.llm_summary?.verdicts || {})" :key="verdict">
+                <span class="px-3 py-1 rounded-full text-xs font-bold"
+                      :style="verdict === 'BUY' ? 'background:var(--accent-green);color:#fff' :
+                              verdict === 'WATCHLIST' ? 'background:var(--accent-blue);color:#fff' :
+                              verdict === 'HOLD' ? 'background:var(--accent-yellow);color:#000' :
+                              'background:var(--accent-red);color:#fff'"
+                      x-text="verdict + ': ' + count"></span>
+            </template>
+        </div>
+        
+        <!-- Stage Distribution -->
+        <div x-show="screenerReport?.llm_summary?.stages && Object.keys(screenerReport?.llm_summary?.stages || {}).length > 0" class="flex flex-wrap gap-2">
+            <template x-for="[stage, count] in Object.entries(screenerReport?.llm_summary?.stages || {})" :key="stage">
+                <span class="px-2 py-1 rounded text-xs" style="background:var(--bg-secondary);color:var(--text-secondary)"
+                      x-text="stage.replace(/_/g, ' ') + ': ' + count"></span>
+            </template>
+        </div>
+    </div>
+
+    <!-- LLM Enriched Stock Cards (for query-based screening with LLM) -->
+    <div x-show="screenerReport?.llm_enriched?.length > 0" class="mb-6">
+        <div class="section-title mb-4">AI-Analyzed Stocks (<span x-text="screenerReport?.llm_enriched?.length || 0"></span>)</div>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <template x-for="stock in screenerReport?.llm_enriched || []" :key="stock.stock">
+                <div class="card fade-in-up" 
+                     :style="stock.llm?.verdict === 'BUY' ? 'border-left:4px solid var(--accent-green)' :
+                             stock.llm?.verdict === 'WATCHLIST' ? 'border-left:4px solid var(--accent-blue)' :
+                             stock.llm?.verdict === 'HOLD' ? 'border-left:4px solid var(--accent-yellow)' :
+                             stock.llm?.verdict === 'AVOID' ? 'border-left:4px solid var(--accent-red)' :
+                             'border-left:4px solid var(--border)'">
+                    
+                    <!-- Header -->
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-2">
+                            <button @click="analyzeFromResults(stock.stock, true)"
+                                    class="font-bold text-lg hover:opacity-80 transition" style="color:var(--accent-blue)"
+                                    x-text="stock.stock?.replace('.NS', '')"></button>
+                        </div>
+                        <div x-show="stock.llm">
+                            <span class="px-2 py-1 rounded text-xs font-bold"
+                                  :style="stock.llm?.verdict === 'BUY' ? 'background:var(--accent-green);color:#fff' :
+                                          stock.llm?.verdict === 'WATCHLIST' ? 'background:var(--accent-blue);color:#fff' :
+                                          stock.llm?.verdict === 'HOLD' ? 'background:var(--accent-yellow);color:#000' :
+                                          'background:var(--accent-red);color:#fff'"
+                                  x-text="stock.llm?.verdict"></span>
+                        </div>
+                    </div>
+                    
+                    <!-- No LLM Message -->
+                    <div x-show="!stock.llm" class="text-xs" style="color:var(--text-secondary)">
+                        AI analysis not available for this stock
+                    </div>
+                    
+                    <!-- LLM Content -->
+                    <div x-show="stock.llm" class="text-sm">
+                        <!-- Confidence & Stage -->
+                        <div class="flex items-center justify-between mb-2 text-xs" style="color:var(--text-secondary)">
+                            <span>Confidence: <strong style="color:var(--text-primary)" x-text="((stock.llm?.confidence || 0) * 100).toFixed(0) + '%'"></strong></span>
+                            <span class="px-1.5 py-0.5 rounded" style="background:var(--bg-secondary)" x-text="stock.llm?.stage?.replace(/_/g, ' ')"></span>
+                        </div>
+                        
+                        <!-- Thesis (first 2 points) -->
+                        <div class="mb-2">
+                            <template x-for="(point, idx) in (stock.llm?.thesis || []).slice(0, 2)" :key="idx">
+                                <div class="flex items-start gap-1 text-xs mb-1">
+                                    <span style="color:var(--accent-green)">•</span>
+                                    <span x-text="point"></span>
+                                </div>
+                            </template>
+                        </div>
+                        
+                        <!-- Entry Strategy -->
+                        <div class="grid grid-cols-2 gap-2 text-xs pt-2" style="border-top:1px solid var(--border)">
+                            <div>
+                                <span style="color:var(--text-secondary)">Entry:</span>
+                                <span class="ml-1" x-text="stock.llm?.entry_strategy?.trigger || '—'"></span>
+                            </div>
+                            <div>
+                                <span style="color:var(--text-secondary)">Zone:</span>
+                                <span class="ml-1" x-text="stock.llm?.entry_strategy?.zone || '—'"></span>
+                            </div>
+                        </div>
+                        
+                        <!-- Risk Flags -->
+                        <div x-show="stock.llm?.risk_flags?.length > 0" class="mt-2 pt-2" style="border-top:1px solid var(--border)">
+                            <div class="flex flex-wrap gap-1">
+                                <template x-for="flag in (stock.llm?.risk_flags || []).slice(0, 2)" :key="flag">
+                                    <span class="px-1.5 py-0.5 rounded text-[10px]" style="background:rgba(239,68,68,0.15);color:var(--accent-red)" x-text="flag"></span>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Stock Details Table (for query-based screening) -->
+    <div x-show="screenerReport?.stock_details?.length > 0 && !screenerReport?.stocks" class="card mb-6 fade-in-up" style="animation-delay:0.15s">
+        <div class="section-title">Stock Details (<span x-text="screenerReport?.stock_details?.length || 0"></span>)</div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-xs">
+                <thead>
+                    <tr style="border-bottom:2px solid var(--border)">
+                        <th class="text-left py-2 px-2">#</th>
+                        <th class="text-left py-2 px-2">Ticker</th>
+                        <th class="text-right py-2 px-2">Price</th>
+                        <th class="text-right py-2 px-2">RSI</th>
+                        <th class="text-right py-2 px-2">DMA 50</th>
+                        <th class="text-right py-2 px-2">DMA 200</th>
+                        <th class="text-right py-2 px-2">52W High</th>
+                        <th class="text-right py-2 px-2">52W Low</th>
+                        <th class="text-right py-2 px-2">Volume</th>
+                        <th class="text-center py-2 px-2">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="(s, idx) in screenerReport?.stock_details || []" :key="s.ticker">
+                        <tr style="border-bottom:1px solid var(--border)" class="hover:opacity-80">
+                            <td class="py-2 px-2 font-mono" x-text="idx + 1"></td>
+                            <td class="py-2 px-2 font-bold" style="color:var(--accent-blue)" x-text="s.ticker?.replace('.NS', '')"></td>
+                            <td class="py-2 px-2 text-right font-mono" x-text="'₹' + (s.current_price || s.close || 0).toFixed(2)"></td>
+                            <td class="py-2 px-2 text-right font-mono" 
+                                :style="(s.rsi || 0) > 70 ? 'color:var(--accent-red)' : (s.rsi || 0) < 30 ? 'color:var(--accent-green)' : ''"
+                                x-text="s.rsi ? s.rsi.toFixed(1) : '—'"></td>
+                            <td class="py-2 px-2 text-right font-mono" x-text="(s.dma_50 || s.sma_50) ? (s.dma_50 || s.sma_50).toFixed(2) : '—'"></td>
+                            <td class="py-2 px-2 text-right font-mono" x-text="(s.dma_200 || s.sma_200) ? (s.dma_200 || s.sma_200).toFixed(2) : '—'"></td>
+                            <td class="py-2 px-2 text-right font-mono" x-text="(s['52_week_high'] || s.high_52w) ? '₹' + (s['52_week_high'] || s.high_52w).toFixed(2) : '—'"></td>
+                            <td class="py-2 px-2 text-right font-mono" x-text="(s['52_week_low'] || s.low_52w) ? '₹' + (s['52_week_low'] || s.low_52w).toFixed(2) : '—'"></td>
+                            <td class="py-2 px-2 text-right font-mono" x-text="s.volume ? (s.volume / 1000).toFixed(0) + 'K' : '—'"></td>
+                            <td class="py-2 px-2 text-center">
+                                <button @click="analyzeFromResults(s.ticker, false)"
+                                        class="text-[10px] px-2 py-1 rounded font-semibold"
+                                        style="background:var(--accent-blue);color:#fff">Analyze</button>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Market Overview (traditional screener only) -->
+    <div x-show="screenerReport?.market_overview" class="card mb-6 fade-in-up" style="overflow:hidden">
+        <div class="section-title" style="color:var(--accent-purple)">Market Overview</div>
+        <p style="color:var(--text-secondary);word-break:break-word;overflow-wrap:break-word" class="text-sm leading-relaxed" x-text="screenerReport?.market_overview"></p>
+    </div>
+
+    <!-- Top 3 Picks (traditional screener only) -->
+    <div x-show="screenerReport?.top_picks?.length > 0" class="card mb-6 fade-in-up" style="border-color:var(--accent-purple);box-shadow:0 0 20px rgba(188,140,255,0.1)">
+        <div class="section-title" style="color:var(--accent-purple)">Top 3 Highest Conviction Ideas</div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <template x-for="pick in screenerReport?.top_picks" :key="pick.rank">
+                <div class="rounded-lg p-4" style="background:var(--bg-secondary)">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="text-lg font-extrabold" style="color:var(--accent-purple)" x-text="'#' + pick.rank"></span>
+                        <span class="font-bold" x-text="pick.ticker"></span>
+                    </div>
+                    <p class="text-sm font-semibold mb-1" x-text="pick.company"></p>
+                    <p class="text-xs mb-2" style="color:var(--text-secondary)" x-text="pick.sector"></p>
+                    <div class="text-xs mb-2">Score: <strong style="color:var(--accent-green)" x-text="pick.composite_score"></strong></div>
+                    <ul class="text-xs space-y-1" style="color:var(--text-secondary)">
+                        <template x-for="reason in pick.conviction_reasons">
+                            <li x-text="'• ' + reason"></li>
+                        </template>
+                    </ul>
+                    <button @click="analyzeFromResults(pick.ticker, false)"
+                            class="mt-3 text-xs px-3 py-1 rounded-md font-semibold transition"
+                            style="background:var(--accent-blue);color:#fff">
+                        Run Technical Analysis →
+                    </button>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Screening Summary Table (traditional screener only) -->
+    <div x-show="screenerReport?.stocks?.length > 0" class="card mb-6 fade-in-up" style="animation-delay:0.1s">
+        <div class="section-title">Screening Summary — Top <span x-text="screenerReport?.stocks?.length"></span> Stocks</div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-xs">
+                <thead>
+                    <tr style="border-bottom:2px solid var(--border)">
+                        <th class="text-left py-2 px-2">#</th>
+                        <th class="text-left py-2 px-2">Ticker</th>
+                        <th class="text-left py-2 px-2">Company</th>
+                        <th class="text-left py-2 px-2">Sector</th>
+                        <th class="text-right py-2 px-2">Price</th>
+                        <th class="text-right py-2 px-2">P/E</th>
+                        <th class="text-center py-2 px-2">P/E vs Sector</th>
+                        <th class="text-right py-2 px-2">Rev Growth</th>
+                        <th class="text-right py-2 px-2">D/E</th>
+                        <th class="text-right py-2 px-2">ROE</th>
+                        <th class="text-center py-2 px-2">Moat</th>
+                        <th class="text-center py-2 px-2">Trend</th>
+                        <th class="text-center py-2 px-2">Risk</th>
+                        <th class="text-right py-2 px-2">Score</th>
+                        <th class="text-center py-2 px-2">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="(s, idx) in screenerReport?.stocks" :key="s.ticker">
+                        <tr style="border-bottom:1px solid var(--border)" class="hover:opacity-80">
+                            <td class="py-2 px-2 font-mono" x-text="idx + 1"></td>
+                            <td class="py-2 px-2 font-bold" style="color:var(--accent-blue)" x-text="s.ticker"></td>
+                            <td class="py-2 px-2" x-text="s.company_name"></td>
+                            <td class="py-2 px-2" style="color:var(--text-secondary)" x-text="s.sector"></td>
+                            <td class="py-2 px-2 text-right font-mono" x-text="'₹' + s.current_price?.toFixed(2)"></td>
+                            <td class="py-2 px-2 text-right font-mono" x-text="s.pe_ratio ? s.pe_ratio.toFixed(1) : '—'"></td>
+                            <td class="py-2 px-2 text-center">
+                                <span class="badge text-[10px]"
+                                      :class="s.pe_vs_sector === 'undervalued' ? 'badge-green' : s.pe_vs_sector === 'overvalued' ? 'badge-red' : 'badge-yellow'"
+                                      x-text="s.pe_vs_sector"></span>
+                            </td>
+                            <td class="py-2 px-2 text-right font-mono"
+                                :style="(s.revenue_growth_5y_pct || 0) >= 0 ? 'color:var(--accent-green)' : 'color:var(--accent-red)'"
+                                x-text="s.revenue_growth_5y_pct != null ? s.revenue_growth_5y_pct.toFixed(1) + '%' : '—'"></td>
+                            <td class="py-2 px-2 text-right font-mono"
+                                :style="(s.debt_to_equity || 0) > 0.8 ? 'color:var(--accent-red)' : 'color:var(--accent-green)'"
+                                x-text="s.debt_to_equity != null ? s.debt_to_equity.toFixed(2) : '—'"></td>
+                            <td class="py-2 px-2 text-right font-mono"
+                                :style="(s.roe_pct || 0) >= 15 ? 'color:var(--accent-green)' : 'color:var(--text-secondary)'"
+                                x-text="s.roe_pct != null ? s.roe_pct.toFixed(1) + '%' : '—'"></td>
+                            <td class="py-2 px-2 text-center">
+                                <span class="badge text-[10px]"
+                                      :class="s.moat === 'strong' ? 'badge-green' : s.moat === 'moderate' ? 'badge-yellow' : 'badge-red'"
+                                      x-text="s.moat"></span>
+                            </td>
+                            <td class="py-2 px-2 text-center">
+                                <span class="badge text-[10px]"
+                                      :class="s.technical_trend === 'bullish' ? 'badge-green' : s.technical_trend === 'bearish' ? 'badge-red' : 'badge-yellow'"
+                                      x-text="s.technical_trend"></span>
+                            </td>
+                            <td class="py-2 px-2 text-center font-mono"
+                                :style="s.risk_score <= 4 ? 'color:var(--accent-green)' : s.risk_score >= 7 ? 'color:var(--accent-red)' : 'color:var(--accent-yellow)'"
+                                x-text="s.risk_score + '/10'"></td>
+                            <td class="py-2 px-2 text-right font-bold" style="color:var(--accent-purple)" x-text="s.composite_score"></td>
+                            <td class="py-2 px-2 text-center">
+                                <button @click="analyzeFromResults(s.ticker, false)"
+                                        class="text-[10px] px-2 py-1 rounded font-semibold"
+                                        style="background:var(--accent-blue);color:#fff">Analyze</button>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Trade Plan Table (traditional screener only) -->
+    <div x-show="screenerReport?.trade_plan_summary?.length > 0" class="card mb-6 fade-in-up" style="animation-delay:0.15s">
+        <div class="section-title" style="color:var(--accent-blue)">Trade Plan</div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-xs">
+                <thead>
+                    <tr style="border-bottom:2px solid var(--border)">
+                        <th class="text-left py-2 px-2">Ticker</th>
+                        <th class="text-right py-2 px-2">Entry Zone</th>
+                        <th class="text-right py-2 px-2" style="color:var(--accent-red)">Stop Loss</th>
+                        <th class="text-right py-2 px-2" style="color:var(--accent-green)">Bull Target</th>
+                        <th class="text-right py-2 px-2" style="color:var(--accent-blue)">Base Target</th>
+                        <th class="text-right py-2 px-2" style="color:var(--accent-red)">Bear Case</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="tp in screenerReport?.trade_plan_summary" :key="tp.ticker">
+                        <tr style="border-bottom:1px solid var(--border)">
+                            <td class="py-2 px-2 font-bold" style="color:var(--accent-blue)" x-text="tp.ticker"></td>
+                            <td class="py-2 px-2 text-right font-mono" x-text="tp.entry_zone"></td>
+                            <td class="py-2 px-2 text-right font-mono" style="color:var(--accent-red)" x-text="tp.stop_loss"></td>
+                            <td class="py-2 px-2 text-right font-mono" style="color:var(--accent-green)" x-text="tp.target_bull"></td>
+                            <td class="py-2 px-2 text-right font-mono" style="color:var(--accent-blue)" x-text="tp.target_base"></td>
+                            <td class="py-2 px-2 text-right font-mono" style="color:var(--accent-red)" x-text="tp.target_bear"></td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Portfolio Allocation (traditional screener only) -->
+    <div x-show="screenerReport?.portfolio_allocation?.stocks?.length > 0" class="card mb-6 fade-in-up" style="animation-delay:0.2s">
+        <div class="section-title" style="color:var(--accent-green)">Portfolio Allocation (₹<span x-text="screenerReport?.portfolio_allocation?.total_capital?.toLocaleString()"></span>)</div>
+        <p style="color:var(--text-secondary)" class="text-xs mb-4" x-text="screenerReport?.portfolio_allocation?.note"></p>
+        <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            <template x-for="alloc in screenerReport?.portfolio_allocation?.stocks" :key="alloc.ticker">
+                <div class="rounded-lg p-3 text-center" style="background:var(--bg-secondary)">
+                    <div class="font-bold text-sm" style="color:var(--accent-blue)" x-text="alloc.ticker"></div>
+                    <div class="text-lg font-extrabold" style="color:var(--accent-green)" x-text="alloc.pct + '%'"></div>
+                    <div style="color:var(--text-secondary)" class="text-xs" x-text="'₹' + alloc.amount?.toLocaleString()"></div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Detailed Analysis per Stock (traditional screener only) -->
+    <div x-show="screenerReport?.stocks?.length > 0" class="card mb-6 fade-in-up" style="animation-delay:0.25s">
+        <div class="section-title">Detailed Stock Analysis</div>
+        <div class="space-y-3">
+            <template x-for="(s, idx) in screenerReport?.stocks" :key="s.ticker">
+                <details class="rounded-lg" style="background:var(--bg-secondary);border:1px solid var(--border)">
+                    <summary class="px-4 py-3 cursor-pointer flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <span class="font-mono text-xs" style="color:var(--text-secondary)" x-text="'#' + (idx+1)"></span>
+                            <span class="font-bold" style="color:var(--accent-blue)" x-text="s.ticker"></span>
+                            <span class="text-sm" x-text="s.company_name"></span>
+                            <span class="badge text-[10px]"
+                                  :class="s.moat === 'strong' ? 'badge-green' : s.moat === 'moderate' ? 'badge-yellow' : 'badge-red'"
+                                  x-text="s.moat + ' moat'"></span>
+                        </div>
+                        <span class="font-bold" style="color:var(--accent-purple)" x-text="'Score: ' + s.composite_score"></span>
+                    </summary>
+                    <div class="px-4 pb-4 grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                        <div>
+                            <p class="font-semibold mb-1" style="color:var(--accent-blue)">Fundamental Summary</p>
+                            <p style="color:var(--text-secondary)" x-text="s.fundamental_summary"></p>
+                        </div>
+                        <div>
+                            <p class="font-semibold mb-1" style="color:var(--accent-green)">Growth Outlook</p>
+                            <p style="color:var(--text-secondary)" x-text="s.growth_outlook"></p>
+                        </div>
+                        <div>
+                            <p class="font-semibold mb-1" style="color:var(--accent-yellow)">Valuation</p>
+                            <p style="color:var(--text-secondary)" x-text="'P/E: ' + (s.pe_ratio? s.pe_ratio.toFixed(1) : 'N/A') + ' vs sector avg ' + (s.sector_avg_pe || 'N/A') + ' (' + (s.pe_vs_sector || 'N/A') + ')'"></p>
+                            <p style="color:var(--text-secondary)" x-text="'PEG: ' + (s.peg_ratio ? s.peg_ratio.toFixed(2) : 'N/A')"></p>
+                        </div>
+                        <div>
+                            <p class="font-semibold mb-1" style="color:var(--accent-red)">Risk Factors</p>
+                            <ul style="color:var(--text-secondary)">
+                                <template x-for="rf in s.risk_factors">
+                                    <li x-text="'• ' + rf"></li>
+                                </template>
+                            </ul>
+                        </div>
+                        <div>
+                            <p class="font-semibold mb-1">Shariah Compliance</p>
+                            <span class="badge text-[10px]" :class="s.shariah_compliant ? 'badge-green' : 'badge-red'"
+                                  x-text="s.shariah_compliant ? '✓ Compliant' : '✗ Not Compliant'"></span>
+                            <p style="color:var(--text-secondary)" class="mt-1" x-text="s.shariah_note"></p>
+                        </div>
+                        <div class="flex items-end">
+                            <button @click="analyzeFromResults(s.ticker, false)"
+                                    class="text-xs px-3 py-1.5 rounded-md font-semibold transition"
+                                    style="background:var(--accent-blue);color:#fff">
+                                Run Full Technical Analysis →
+                            </button>
+                        </div>
+                    </div>
+                </details>
+            </template>
+        </div>
+    </div>
+
+</div>
+
+<!-- ─── ANALYSIS MODE: LOADING STATE ────────────────────── -->
+<div x-show="loading && mode === 'analysis'" class="max-w-7xl mx-auto px-4 sm:px-6 pb-20">
+    <div class="text-center py-8">
+        <div class="spinner mx-auto mb-4" style="width:40px;height:40px;border-width:3px"></div>
+        <p style="color:var(--text-secondary)" class="text-lg">Analyzing <strong x-text="ticker.toUpperCase()"></strong>...</p>
+        <div class="mt-6 max-w-md mx-auto">
+            <div class="progress-track">
+                <div class="progress-fill" style="background:var(--accent-blue);width:0%" x-ref="progressBar"></div>
+            </div>
+            <p style="color:var(--text-secondary)" class="text-sm mt-2" x-text="loadingStep"></p>
+        </div>
+    </div>
+    <!-- Skeleton cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+        <template x-for="i in 6"><div class="skeleton h-40 rounded-xl"></div></template>
+    </div>
+</div>
+
+<!-- ─── ERROR STATE ─────────────────────────────────────── -->
+<div x-show="error && mode === 'analysis'" class="max-w-7xl mx-auto px-4 sm:px-6">
+    <div class="card flex items-center gap-4 mb-6" style="border-color:var(--accent-red)">
+        <span class="text-3xl">⚠️</span>
+        <div>
+            <p class="font-semibold">Analysis Failed</p>
+            <p style="color:var(--text-secondary)" x-text="error"></p>
+        </div>
+        <button @click="error=null" class="ml-auto btn-primary" style="background:var(--accent-red);padding:8px 16px;font-size:13px">Dismiss</button>
+    </div>
+</div>
+
+<!-- ─── REPORT ──────────────────────────────────────────── -->
+<div x-show="report && mode === 'analysis'" x-transition class="max-w-7xl mx-auto px-4 sm:px-6 pb-20">
+
+    <!-- Quote Header -->
+    <div x-show="report" class="card mb-6 fade-in-up">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+            <div>
+                <div class="flex items-center gap-3">
+                    <h2 class="text-3xl font-extrabold" x-text="report?.meta?.symbol"></h2>
+                    <span :class="marketStateBadge()" class="badge text-sm" x-text="report?.quant_scores?.market_state?.replace(/_/g, ' ')"></span>
+                </div>
+                <p style="color:var(--text-secondary)" class="text-sm mt-1" x-text="report?.meta?.company_name"></p>
+            </div>
+            <div class="text-right">
+                <div class="text-3xl font-bold" x-text="cs() + report?.price_snapshot?.current_price?.toFixed(2)"></div>
+                <div class="flex items-center gap-2 justify-end mt-1">
+                    <span :style="report?.price_snapshot?.change >= 0 ? 'color:var(--accent-green)' : 'color:var(--accent-red)'" class="font-semibold"
+                          x-text="(report?.price_snapshot?.change >= 0 ? '+' : '') + report?.price_snapshot?.change?.toFixed(2) + ' (' + report?.price_snapshot?.change_pct?.toFixed(2) + '%)'">
+                    </span>
+                </div>
+            </div>
+        </div>
+        <!-- Mini stats row -->
+        <div class="grid grid-cols-2 sm:grid-cols-5 gap-4 mt-4 pt-4" style="border-top:1px solid var(--border)">
+            <div><span style="color:var(--text-secondary)" class="text-xs">Open</span><div class="font-semibold" x-text="cs() + report?.price_snapshot?.open?.toFixed(2)"></div></div>
+            <div><span style="color:var(--text-secondary)" class="text-xs">Day High</span><div class="font-semibold" x-text="cs() + report?.price_snapshot?.day_high?.toFixed(2)"></div></div>
+            <div><span style="color:var(--text-secondary)" class="text-xs">Day Low</span><div class="font-semibold" x-text="cs() + report?.price_snapshot?.day_low?.toFixed(2)"></div></div>
+            <div><span style="color:var(--text-secondary)" class="text-xs">Volume</span><div class="font-semibold" x-text="formatNum(report?.price_snapshot?.volume)"></div></div>
+            <div><span style="color:var(--text-secondary)" class="text-xs">52W Range</span>
+                <div class="text-xs">
+                    <span style="color:var(--accent-green)" x-text="report?.price_snapshot?.distance_from_52w_low_pct?.toFixed(1) + '% from low'"></span>
+                    <span style="color:var(--text-secondary)"> · </span>
+                    <span style="color:var(--accent-red)" x-text="report?.price_snapshot?.distance_from_52w_high_pct?.toFixed(1) + '% from high'"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Analysis Card (only shown when LLM analysis is present) -->
+    <div x-show="report?.llm_analysis" class="card mb-6 fade-in-up" style="border-color:var(--accent-purple)">
+        <div class="flex items-center justify-between mb-4">
+            <div class="section-title flex items-center gap-2">
+                <span style="color:var(--accent-purple)">🤖</span> AI Analysis
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="px-3 py-1 rounded-full text-sm font-bold"
+                      :style="report?.llm_analysis?.verdict === 'BUY' ? 'background:var(--accent-green);color:#fff' :
+                              report?.llm_analysis?.verdict === 'WATCHLIST' ? 'background:var(--accent-blue);color:#fff' :
+                              report?.llm_analysis?.verdict === 'HOLD' ? 'background:var(--accent-yellow);color:#000' :
+                              'background:var(--accent-red);color:#fff'"
+                      x-text="report?.llm_analysis?.verdict"></span>
+                <span style="color:var(--text-secondary)" class="text-xs">
+                    Confidence: <strong x-text="((report?.llm_analysis?.confidence || 0) * 100).toFixed(0) + '%'"></strong>
+                </span>
+            </div>
+        </div>
+        
+        <!-- Stage -->
+        <div class="mb-4">
+            <span style="color:var(--text-secondary)" class="text-xs">Trend Stage:</span>
+            <span class="ml-2 px-2 py-0.5 rounded text-xs font-semibold" style="background:var(--bg-secondary);color:var(--text-primary)"
+                  x-text="report?.llm_analysis?.stage?.replace(/_/g, ' ')"></span>
+        </div>
+        
+        <!-- Thesis -->
+        <div class="mb-4">
+            <div style="color:var(--text-secondary)" class="text-xs mb-2">Investment Thesis:</div>
+            <ul class="space-y-1">
+                <template x-for="point in report?.llm_analysis?.thesis || []" :key="point">
+                    <li class="flex items-start gap-2 text-sm">
+                        <span style="color:var(--accent-green)">•</span>
+                        <span x-text="point"></span>
+                    </li>
+                </template>
+            </ul>
+        </div>
+        
+        <!-- Strength Signals Grid -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4" style="border-top:1px solid var(--border);padding-top:1rem">
+            <div>
+                <span style="color:var(--text-secondary)" class="text-xs block">Trend Alignment</span>
+                <span class="text-sm font-semibold" x-text="report?.llm_analysis?.strength_signals?.trend_alignment || '—'"></span>
+            </div>
+            <div>
+                <span style="color:var(--text-secondary)" class="text-xs block">Momentum Quality</span>
+                <span class="text-sm font-semibold" x-text="report?.llm_analysis?.strength_signals?.momentum_quality || '—'"></span>
+            </div>
+            <div>
+                <span style="color:var(--text-secondary)" class="text-xs block">Volume Support</span>
+                <span class="text-sm font-semibold" x-text="report?.llm_analysis?.strength_signals?.volume_support || '—'"></span>
+            </div>
+            <div>
+                <span style="color:var(--text-secondary)" class="text-xs block">Price Structure</span>
+                <span class="text-sm font-semibold" x-text="report?.llm_analysis?.strength_signals?.price_structure || '—'"></span>
+            </div>
+        </div>
+        
+        <!-- Entry Strategy -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4" style="border-top:1px solid var(--border);padding-top:1rem">
+            <div>
+                <span style="color:var(--text-secondary)" class="text-xs block">Entry Trigger</span>
+                <span class="text-sm font-semibold" style="color:var(--accent-blue)" x-text="report?.llm_analysis?.entry_strategy?.trigger || '—'"></span>
+            </div>
+            <div>
+                <span style="color:var(--text-secondary)" class="text-xs block">Entry Zone</span>
+                <span class="text-sm font-semibold" x-text="report?.llm_analysis?.entry_strategy?.zone || '—'"></span>
+            </div>
+            <div>
+                <span style="color:var(--text-secondary)" class="text-xs block">Position Size</span>
+                <span class="text-sm font-semibold" x-text="report?.llm_analysis?.entry_strategy?.position_size || '—'"></span>
+            </div>
+            <div>
+                <span style="color:var(--text-secondary)" class="text-xs block">Time Horizon</span>
+                <span class="text-sm font-semibold" x-text="report?.llm_analysis?.entry_strategy?.time_horizon || '—'"></span>
+            </div>
+        </div>
+        
+        <!-- Risk Flags -->
+        <div x-show="report?.llm_analysis?.risk_flags?.length > 0" style="border-top:1px solid var(--border);padding-top:1rem">
+            <div style="color:var(--accent-red)" class="text-xs mb-2 font-semibold">⚠️ Risk Flags:</div>
+            <div class="flex flex-wrap gap-2">
+                <template x-for="flag in report?.llm_analysis?.risk_flags || []" :key="flag">
+                    <span class="px-2 py-1 rounded text-xs" style="background:rgba(239,68,68,0.15);color:var(--accent-red)" x-text="flag"></span>
+                </template>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chart -->
+    <div class="card mb-6 fade-in-up" style="animation-delay:0.05s">
+        <div class="section-title">Price Chart</div>
+        <div id="chart-container" style="height:400px"></div>
+    </div>
+
+    <!-- Row 1: Trend Structure · Support & Resistance · Quant Scores -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+
+        <!-- Trend Structure -->
+        <div class="card fade-in-up" style="animation-delay:0.1s">
+            <div class="section-title">Trend Structure</div>
+            <div class="space-y-2 mb-3">
+                <div class="flex items-center justify-between">
+                    <span style="color:var(--text-secondary)" class="text-xs">Primary</span>
+                    <span :class="trendBadge(report?.trend_structure?.primary_trend)" class="badge text-xs" x-text="report?.trend_structure?.primary_trend"></span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span style="color:var(--text-secondary)" class="text-xs">Daily</span>
+                    <span :class="trendBadge(report?.trend_structure?.daily_trend)" class="badge text-xs" x-text="report?.trend_structure?.daily_trend"></span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span style="color:var(--text-secondary)" class="text-xs">Weekly</span>
+                    <span :class="trendBadge(report?.trend_structure?.weekly_trend)" class="badge text-xs" x-text="report?.trend_structure?.weekly_trend"></span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span style="color:var(--text-secondary)" class="text-xs">Monthly</span>
+                    <span :class="trendBadge(report?.trend_structure?.monthly_trend)" class="badge text-xs" x-text="report?.trend_structure?.monthly_trend"></span>
+                </div>
+            </div>
+            <div class="text-xs space-y-1 mb-3" style="color:var(--text-secondary)">
+                <div>Alignment: <strong x-text="report?.trend_structure?.trend_alignment?.replace(/_/g, ' ')"></strong></div>
+                <div>SMA Position: <span class="font-mono" x-text="report?.trend_structure?.sma_positioning"></span></div>
+                <div>ADX: <strong x-text="report?.trend_structure?.adx"></strong> (<span x-text="report?.trend_structure?.trend_strength"></span>)</div>
+                <div>Supertrend: <span :style="report?.trend_structure?.supertrend_signal === 'buy' ? 'color:var(--accent-green)' : 'color:var(--accent-red)'" class="font-semibold" x-text="report?.trend_structure?.supertrend_signal?.toUpperCase()"></span></div>
+                <div>HH/HL: <span x-text="report?.trend_structure?.higher_highs_lows ? '✓ Yes' : '✗ No'"></span></div>
+            </div>
+            <table class="mb-2">
+                <tr><td style="color:var(--text-secondary)" class="text-xs">50-day MA</td><td class="font-mono font-semibold text-sm" x-text="report?.trend_structure?.ma_50 ? cs() + report.trend_structure.ma_50.toFixed(2) : 'N/A'"></td></tr>
+                <tr><td style="color:var(--text-secondary)" class="text-xs">100-day MA</td><td class="font-mono font-semibold text-sm" x-text="report?.trend_structure?.ma_100 ? cs() + report.trend_structure.ma_100.toFixed(2) : 'N/A'"></td></tr>
+                <tr><td style="color:var(--text-secondary)" class="text-xs">200-day MA</td><td class="font-mono font-semibold text-sm" x-text="report?.trend_structure?.ma_200 ? cs() + report.trend_structure.ma_200.toFixed(2) : 'N/A'"></td></tr>
+            </table>
+            <template x-for="sig in report?.trend_structure?.crossover_signals">
+                <div class="mt-1 text-xs px-3 py-2 rounded-lg" style="background:var(--bg-secondary);color:var(--accent-yellow)" x-text="sig"></div>
+            </template>
+        </div>
+
+        <!-- Support & Resistance -->
+        <div class="card fade-in-up" style="animation-delay:0.15s">
+            <div class="section-title">Support & Resistance</div>
+            <div class="mb-3">
+                <p style="color:var(--accent-green)" class="text-xs font-semibold mb-2">SUPPORT LEVELS</p>
+                <template x-for="s in report?.support_resistance?.support_levels">
+                    <div class="flex items-center gap-2 mb-1">
+                        <div style="background:var(--accent-green);width:8px;height:8px;border-radius:50%"></div>
+                        <span class="font-mono font-semibold text-sm" x-text="cs() + s.toFixed(2)"></span>
+                    </div>
+                </template>
+            </div>
+            <div class="mb-3">
+                <p style="color:var(--accent-red)" class="text-xs font-semibold mb-2">RESISTANCE LEVELS</p>
+                <template x-for="r in report?.support_resistance?.resistance_levels">
+                    <div class="flex items-center gap-2 mb-1">
+                        <div style="background:var(--accent-red);width:8px;height:8px;border-radius:50%"></div>
+                        <span class="font-mono font-semibold text-sm" x-text="cs() + r.toFixed(2)"></span>
+                    </div>
+                </template>
+            </div>
+            <div class="text-xs space-y-1" style="color:var(--text-secondary)">
+                <div>Nearest Support: <strong x-text="cs() + report?.support_resistance?.nearest_support?.toFixed(2)"></strong></div>
+                <div>Nearest Resistance: <strong x-text="cs() + report?.support_resistance?.nearest_resistance?.toFixed(2)"></strong></div>
+                <div>Breakout Probability: <strong :style="report?.support_resistance?.breakout_probability === 'high' ? 'color:var(--accent-green)' : report?.support_resistance?.breakout_probability === 'moderate' ? 'color:var(--accent-yellow)' : 'color:var(--accent-red)'" x-text="report?.support_resistance?.breakout_probability"></strong></div>
+            </div>
+        </div>
+
+        <!-- Quant Scores -->
+        <div class="card fade-in-up" style="animation-delay:0.2s">
+            <div class="section-title">Quant Scores</div>
+            <div class="space-y-3 mb-4">
+                <template x-for="s in [
+                    {label: 'Trend', score: report?.quant_scores?.trend_score},
+                    {label: 'Momentum', score: report?.quant_scores?.momentum_score},
+                    {label: 'Volume', score: report?.quant_scores?.volume_score},
+                    {label: 'Volatility', score: report?.quant_scores?.volatility_score}
+                ]" :key="s.label">
+                    <div>
+                        <div class="flex items-center justify-between mb-1">
+                            <span style="color:var(--text-secondary)" class="text-xs" x-text="s.label"></span>
+                            <span class="font-mono font-bold text-sm" :style="s.score > 0 ? 'color:var(--accent-green)' : s.score < 0 ? 'color:var(--accent-red)' : 'color:var(--text-secondary)'" x-text="(s.score > 0 ? '+' : '') + s.score"></span>
+                        </div>
+                        <div class="progress-track" style="height:6px">
+                            <div class="progress-fill" :style="'width:' + ((s.score + 3) / 6 * 100) + '%;background:' + (s.score > 0 ? 'var(--accent-green)' : s.score < 0 ? 'var(--accent-red)' : 'var(--accent-yellow)')"></div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+            <div class="text-center py-3 rounded-lg" style="background:var(--bg-secondary)">
+                <span style="color:var(--text-secondary)" class="text-xs block mb-1">Composite Score</span>
+                <div class="text-3xl font-extrabold" :style="report?.quant_scores?.composite_score > 0 ? 'color:var(--accent-green)' : report?.quant_scores?.composite_score < 0 ? 'color:var(--accent-red)' : 'color:var(--text-secondary)'" x-text="(report?.quant_scores?.composite_score > 0 ? '+' : '') + report?.quant_scores?.composite_score"></div>
+                <span class="text-xs font-semibold" style="color:var(--accent-blue)" x-text="report?.quant_scores?.market_state?.replace(/_/g, ' ')"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Row 2: Momentum · Volume Intelligence · Volatility Risk -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+
+        <!-- Momentum Signals -->
+        <div class="card fade-in-up" style="animation-delay:0.25s">
+            <div class="section-title">Momentum Signals</div>
+            <div class="flex items-end gap-4 mb-3">
+                <span class="text-4xl font-extrabold" x-text="report?.momentum_signals?.rsi"></span>
+                <span :class="rsiBadge()" class="badge mb-1" x-text="report?.momentum_signals?.rsi_state?.replace(/_/g, ' ')"></span>
+            </div>
+            <div class="progress-track mb-2" style="height:10px">
+                <div class="progress-fill" :style="'width:' + report?.momentum_signals?.rsi + '%;background:' + rsiColor()"></div>
+            </div>
+            <div class="flex justify-between text-xs mb-3" style="color:var(--text-secondary)">
+                <span>0 — Oversold</span><span>50</span><span>Overbought — 100</span>
+            </div>
+            <table class="mb-3">
+                <tr><td style="color:var(--text-secondary)" class="text-xs">MACD Line</td><td class="font-mono font-semibold text-sm" x-text="report?.momentum_signals?.macd_line?.toFixed(4)"></td></tr>
+                <tr><td style="color:var(--text-secondary)" class="text-xs">Signal Line</td><td class="font-mono font-semibold text-sm" x-text="report?.momentum_signals?.signal_line?.toFixed(4)"></td></tr>
+                <tr>
+                    <td style="color:var(--text-secondary)" class="text-xs">Histogram</td>
+                    <td class="font-mono font-semibold text-sm">
+                        <span :style="report?.momentum_signals?.histogram >= 0 ? 'color:var(--accent-green)' : 'color:var(--accent-red)'"
+                              x-text="report?.momentum_signals?.histogram?.toFixed(4)"></span>
+                    </td>
+                </tr>
+                <tr><td style="color:var(--text-secondary)" class="text-xs">MACD Signal</td><td class="font-semibold text-xs" :style="report?.momentum_signals?.macd_signal?.startsWith('bullish') ? 'color:var(--accent-green)' : 'color:var(--accent-red)'" x-text="report?.momentum_signals?.macd_signal?.replace(/_/g, ' ')"></td></tr>
+                <tr><td style="color:var(--text-secondary)" class="text-xs">Acceleration</td><td class="font-semibold text-xs" x-text="report?.momentum_signals?.momentum_acceleration"></td></tr>
+            </table>
+        </div>
+
+        <!-- Volume Intelligence -->
+        <div class="card fade-in-up" style="animation-delay:0.3s">
+            <div class="section-title">Volume Intelligence</div>
+            <div class="flex items-end gap-3 mb-3">
+                <div>
+                    <span style="color:var(--text-secondary)" class="text-xs">Current</span>
+                    <div class="font-mono font-bold text-lg" x-text="formatNum(report?.volume_intelligence?.current_volume)"></div>
+                </div>
+                <div>
+                    <span style="color:var(--text-secondary)" class="text-xs">20D Avg</span>
+                    <div class="font-mono text-sm" style="color:var(--text-secondary)" x-text="formatNum(report?.volume_intelligence?.avg_volume)"></div>
+                </div>
+                <span :class="report?.volume_intelligence?.volume_ratio > 1.2 ? 'badge-blue' : report?.volume_intelligence?.volume_ratio < 0.8 ? 'badge-yellow' : 'badge-purple'"
+                      class="badge text-xs mb-1" x-text="report?.volume_intelligence?.volume_ratio + 'x'"></span>
+            </div>
+            <div class="text-xs space-y-1 mb-3" style="color:var(--text-secondary)">
+                <div>OBV Trend: <strong :style="report?.volume_intelligence?.obv_trend === 'rising' ? 'color:var(--accent-green)' : report?.volume_intelligence?.obv_trend === 'falling' ? 'color:var(--accent-red)' : ''" x-text="report?.volume_intelligence?.obv_trend"></strong></div>
+                <div>A/D Signal: <strong :style="report?.volume_intelligence?.accumulation_distribution === 'accumulation' ? 'color:var(--accent-green)' : report?.volume_intelligence?.accumulation_distribution === 'distribution' ? 'color:var(--accent-red)' : ''" x-text="report?.volume_intelligence?.accumulation_distribution"></strong></div>
+                <div>VWAP: <strong x-text="cs() + report?.volume_intelligence?.vwap?.toFixed(2)"></strong></div>
+                <div>Price vs VWAP: <strong :style="report?.volume_intelligence?.price_vs_vwap === 'above' ? 'color:var(--accent-green)' : 'color:var(--accent-red)'" x-text="report?.volume_intelligence?.price_vs_vwap"></strong></div>
+                <div>Volume Confirms Trend: <span x-text="report?.volume_intelligence?.volume_confirmation ? '✓ Yes' : '✗ No'" :style="report?.volume_intelligence?.volume_confirmation ? 'color:var(--accent-green)' : 'color:var(--accent-red)'"></span></div>
+            </div>
+        </div>
+
+        <!-- Volatility Risk -->
+        <div class="card fade-in-up" style="animation-delay:0.35s">
+            <div class="section-title">Volatility & Risk</div>
+            <div class="flex items-end gap-3 mb-3">
+                <div>
+                    <span style="color:var(--text-secondary)" class="text-xs">ATR</span>
+                    <div class="font-mono font-bold text-lg" x-text="cs() + report?.volatility_risk?.atr?.toFixed(2)"></div>
+                </div>
+                <div>
+                    <span style="color:var(--text-secondary)" class="text-xs">ATR %</span>
+                    <div class="font-mono text-sm" style="color:var(--accent-yellow)" x-text="report?.volatility_risk?.atr_percent?.toFixed(2) + '%'"></div>
+                </div>
+                <span class="badge text-xs mb-1"
+                      :class="report?.volatility_risk?.volatility_regime === 'low' ? 'badge-green' : report?.volatility_risk?.volatility_regime === 'moderate' ? 'badge-yellow' : 'badge-red'"
+                      x-text="report?.volatility_risk?.volatility_regime"></span>
+            </div>
+            <table class="mb-3">
+                <tr><td style="color:var(--accent-red)" class="text-xs">Upper Band</td><td class="font-mono font-semibold text-sm" x-text="cs() + report?.volatility_risk?.bollinger_upper?.toFixed(2)"></td></tr>
+                <tr><td style="color:var(--text-secondary)" class="text-xs">Middle (SMA)</td><td class="font-mono font-semibold text-sm" x-text="cs() + report?.volatility_risk?.bollinger_middle?.toFixed(2)"></td></tr>
+                <tr><td style="color:var(--accent-green)" class="text-xs">Lower Band</td><td class="font-mono font-semibold text-sm" x-text="cs() + report?.volatility_risk?.bollinger_lower?.toFixed(2)"></td></tr>
+                <tr><td style="color:var(--text-secondary)" class="text-xs">Bandwidth</td><td class="font-mono font-semibold text-sm" x-text="report?.volatility_risk?.bollinger_bandwidth?.toFixed(2) + '%'"></td></tr>
+                <tr><td style="color:var(--text-secondary)" class="text-xs">BB Position</td><td class="font-semibold text-xs" x-text="report?.volatility_risk?.bollinger_position?.replace(/_/g, ' ')"></td></tr>
+            </table>
+        </div>
+    </div>
+
+    <!-- Row 3: Patterns · Fibonacci · Derived Signals -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+
+        <!-- Patterns -->
+        <div class="card fade-in-up" style="animation-delay:0.4s">
+            <div class="section-title">Chart Patterns</div>
+            <div class="flex flex-wrap gap-2 mb-3">
+                <template x-for="p in report?.support_resistance?.patterns_detected">
+                    <span class="badge badge-purple" x-text="p"></span>
+                </template>
+            </div>
+        </div>
+
+        <!-- Fibonacci -->
+        <div class="card fade-in-up" style="animation-delay:0.45s">
+            <div class="section-title">Fibonacci Retracement</div>
+            <div class="space-y-2 mb-3">
+                <template x-for="(val, key) in report?.support_resistance?.fibonacci_levels" :key="key">
+                    <div class="flex items-center gap-2">
+                        <span style="color:var(--text-secondary)" class="text-xs w-12" x-text="key"></span>
+                        <div class="flex-1 progress-track">
+                            <div class="fib-bar" :style="'width:' + fibWidth(key) + '%;background:' + fibColor(key)"></div>
+                        </div>
+                        <span class="font-mono text-xs font-semibold w-16 text-right" x-text="cs() + val?.toFixed(2)"></span>
+                    </div>
+                </template>
+            </div>
+            <div class="text-xs" style="color:var(--text-secondary)">
+                Trend: <strong x-text="report?.support_resistance?.fibonacci_trend"></strong>
+            </div>
+        </div>
+
+        <!-- Derived Signals -->
+        <div class="card fade-in-up" style="animation-delay:0.5s">
+            <div class="section-title">Derived Signals</div>
+            <div class="space-y-3">
+                <div class="flex items-center justify-between">
+                    <span style="color:var(--text-secondary)" class="text-xs">Trend Confirmation</span>
+                    <span class="font-semibold text-xs" :style="report?.derived_signals?.trend_confirmation ? 'color:var(--accent-green)' : 'color:var(--accent-red)'" x-text="report?.derived_signals?.trend_confirmation ? '✓ Confirmed' : '✗ Not confirmed'"></span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span style="color:var(--text-secondary)" class="text-xs">Momentum Confirmation</span>
+                    <span class="font-semibold text-xs" :style="report?.derived_signals?.momentum_confirmation ? 'color:var(--accent-green)' : 'color:var(--accent-red)'" x-text="report?.derived_signals?.momentum_confirmation ? '✓ Confirmed' : '✗ Not confirmed'"></span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span style="color:var(--text-secondary)" class="text-xs">Volume Confirmation</span>
+                    <span class="font-semibold text-xs" :style="report?.derived_signals?.volume_confirmation ? 'color:var(--accent-green)' : 'color:var(--accent-red)'" x-text="report?.derived_signals?.volume_confirmation ? '✓ Confirmed' : '✗ Not confirmed'"></span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span style="color:var(--text-secondary)" class="text-xs">Risk Environment</span>
+                    <span class="font-semibold text-xs" :style="report?.derived_signals?.risk_environment === 'favorable' ? 'color:var(--accent-green)' : report?.derived_signals?.risk_environment === 'unfavorable' ? 'color:var(--accent-red)' : 'color:var(--accent-yellow)'" x-text="report?.derived_signals?.risk_environment"></span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span style="color:var(--text-secondary)" class="text-xs">Trend Maturity</span>
+                    <span class="font-semibold text-xs" style="color:var(--accent-blue)" x-text="report?.derived_signals?.trend_maturity?.replace(/_/g, ' ')"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── TRADE LEVELS (highlighted) ──────────────────── -->
+    <div class="card mb-6 fade-in-up" style="animation-delay:0.55s;border-color:var(--accent-blue);box-shadow:0 0 20px rgba(88,166,255,0.1)">
+        <div class="flex items-center justify-between mb-4">
+            <div class="section-title mb-0" style="color:var(--accent-blue)">Trade Levels</div>
+            <span class="text-xs px-3 py-1 rounded-full font-semibold" style="background:var(--accent-blue);color:#fff" x-text="report?.trade_levels?.strategy_horizon + ' strategy'"></span>
+        </div>
+
+        <!-- Bias + Entry + R:R row -->
+        <div class="grid grid-cols-3 gap-4 mb-5">
+            <div class="text-center py-3 rounded-lg" style="background:var(--bg-secondary)">
+                <span style="color:var(--text-secondary)" class="text-xs block mb-1">Bias</span>
+                <div class="text-xl font-bold"
+                     :style="report?.trade_levels?.position_bias === 'Long' ? 'color:var(--accent-green)' : 'color:var(--accent-red)'"
+                     x-text="report?.trade_levels?.position_bias"></div>
+            </div>
+            <div class="text-center py-3 rounded-lg" style="background:var(--bg-secondary)">
+                <span style="color:var(--text-secondary)" class="text-xs block mb-1">Ideal Entry</span>
+                <div class="text-xl font-bold font-mono" style="color:var(--accent-blue)" x-text="cs() + report?.trade_levels?.ideal_entry?.toFixed(2)"></div>
+            </div>
+            <div class="text-center py-3 rounded-lg" style="background:var(--bg-secondary)">
+                <span style="color:var(--text-secondary)" class="text-xs block mb-1">Risk : Reward</span>
+                <div class="text-xl font-extrabold" style="color:var(--accent-yellow)" x-text="'1 : ' + report?.trade_levels?.risk_reward_ratio"></div>
+                <span style="color:var(--text-secondary)" class="text-[10px]">(SL1 → T2)</span>
+            </div>
+        </div>
+
+        <!-- Targets + Stop-losses side by side -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <!-- Targets -->
+            <div class="rounded-lg p-4" style="background:var(--bg-secondary);border:1px solid rgba(63,185,80,0.2)">
+                <div class="text-xs font-bold mb-3" style="color:var(--accent-green)">▲ TARGETS</div>
+                <template x-for="t in report?.trade_levels?.targets" :key="t.label">
+                    <div class="flex items-center justify-between py-2" style="border-bottom:1px solid var(--border)">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs font-bold px-2 py-0.5 rounded"
+                                  style="background:rgba(63,185,80,0.15);color:var(--accent-green)"
+                                  x-text="t.label"></span>
+                            <span class="font-mono font-bold text-sm" style="color:var(--accent-green)" x-text="cs() + t.price?.toFixed(2)"></span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span class="text-[10px] font-mono px-1.5 py-0.5 rounded" style="background:var(--bg-primary);color:var(--text-secondary)"
+                                  x-text="t.expected_move_multiple_atr?.toFixed(2) + '× ATR'"></span>
+                            <div class="flex items-center gap-1" :title="'Confidence: ' + t.confidence_percent + '%'">
+                                <div class="w-14 h-1.5 rounded-full overflow-hidden" style="background:var(--bg-primary)">
+                                    <div class="h-full rounded-full" :style="'width:' + (t.confidence_percent || 0) + '%;background:' + (t.confidence_percent >= 60 ? 'var(--accent-green)' : t.confidence_percent >= 30 ? 'var(--accent-yellow)' : 'var(--accent-red)')"></div>
+                                </div>
+                                <span class="text-[10px] font-bold font-mono w-8 text-right" :style="(t.confidence_percent >= 60 ? 'color:var(--accent-green)' : t.confidence_percent >= 30 ? 'color:var(--accent-yellow)' : 'color:var(--accent-red)')"
+                                      x-text="t.confidence_percent + '%'"></span>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+            <!-- Stop-losses -->
+            <div class="rounded-lg p-4" style="background:var(--bg-secondary);border:1px solid rgba(248,81,73,0.2)">
+                <div class="text-xs font-bold mb-3" style="color:var(--accent-red)">▼ STOP-LOSSES</div>
+                <template x-for="sl in report?.trade_levels?.stop_losses" :key="sl.label">
+                    <div class="flex items-center justify-between py-2" style="border-bottom:1px solid var(--border)">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs font-bold px-2 py-0.5 rounded"
+                                  style="background:rgba(248,81,73,0.15);color:var(--accent-red)"
+                                  x-text="sl.label"></span>
+                            <span class="font-mono font-bold text-sm" style="color:var(--accent-red)" x-text="cs() + sl.price?.toFixed(2)"></span>
+                        </div>
+                        <span style="color:var(--text-secondary)" class="text-xs" x-text="sl.basis"></span>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- ─── FOOTER ──────────────────────────────────────────── -->
+<footer class="text-center py-6" style="color:var(--text-secondary);border-top:1px solid var(--border)">
+    <p class="text-xs">StockAnalyzer · For informational purposes only · Not financial advice</p>
+</footer>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>
