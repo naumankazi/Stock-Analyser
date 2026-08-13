@@ -128,16 +128,27 @@ def resolve_ticker(ticker: str) -> str:
 @retry_on_rate_limit
 def _try_resolve_ticker(candidate: str) -> bool:
     """Try to fetch data for a ticker candidate. Returns True if data exists."""
-    tk = yf.Ticker(candidate)
-    df = tk.history(period="5d")
-    return not df.empty
+    try:
+        tk = yf.Ticker(candidate)
+        df = tk.history(period="5d")
+        return not df.empty
+    except Exception as e:
+        if _is_rate_limit_error(e):
+            raise
+        return False
 
 
 @retry_on_rate_limit
 def _fetch_history_with_retry(ticker: str, period: str, interval: str) -> pd.DataFrame:
     """Fetch history with retry on rate limit."""
-    tk = yf.Ticker(ticker)
-    return tk.history(period=period, interval=interval)
+    try:
+        tk = yf.Ticker(ticker)
+        return tk.history(period=period, interval=interval)
+    except Exception as e:
+        if _is_rate_limit_error(e):
+            raise
+        logger.warning("yfinance history fetch failed for %s (%s: %s)", ticker, type(e).__name__, e)
+        return pd.DataFrame()
 
 
 def _is_indian_ticker(ticker: str) -> bool:
