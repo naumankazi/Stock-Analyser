@@ -590,6 +590,7 @@ def prepare_stock_data(ticker: str) -> dict[str, float] | None:
         
         # ── Price fields ──
         data["close"] = float(latest.get("close", 0))
+        data["current_price"] = data["close"]
         data["open"] = float(latest.get("open", 0))
         data["high"] = float(latest.get("high", 0))
         data["low"] = float(latest.get("low", 0))

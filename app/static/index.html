@@ -424,9 +424,9 @@ https://www.screener.in/screens/3625029/strength-with-volume/"
                             <td class="py-2 px-2 text-right font-mono"
                                 :style="s.close > s.sma_200 ? 'color:var(--accent-green)' : 'color:var(--accent-red)'"
                                 x-text="s.sma_200 ? ((s.close / s.sma_200 - 1) * 100).toFixed(1) + '%' : '—'"></td>
-                            <td class="py-2 px-2 text-right font-mono" style="color:var(--accent-blue)" x-text="s.entry_zone_low ? '₹' + s.entry_zone_low.toFixed(2) + ' - ₹' + s.entry_zone_high.toFixed(2) : '—'"></td>
-                            <td class="py-2 px-2 text-right font-mono" style="color:var(--accent-red)" x-text="s.stop_loss ? '₹' + s.stop_loss.toFixed(2) : '—'"></td>
-                            <td class="py-2 px-2 text-right font-mono" style="color:var(--accent-green)" x-text="s.target_bull ? '₹' + s.target_bull.toFixed(2) : '—'"></td>
+                            <td class="py-2 px-2 text-right font-mono" style="color:var(--accent-blue)" x-text="s.entry_zone_low ? ('₹' + Number(s.entry_zone_low).toFixed(2) + ' - ₹' + Number(s.entry_zone_high).toFixed(2)) : (s.close || s.current_price) ? ('₹' + ((s.close || s.current_price) * 0.97).toFixed(2) + ' - ₹' + (s.close || s.current_price).toFixed(2)) : '—'"></td>
+                            <td class="py-2 px-2 text-right font-mono" style="color:var(--accent-red)" x-text="s.stop_loss ? ('₹' + Number(s.stop_loss).toFixed(2)) : (s.close || s.current_price) ? ('₹' + ((s.close || s.current_price) * 0.93).toFixed(2)) : '—'"></td>
+                            <td class="py-2 px-2 text-right font-mono" style="color:var(--accent-green)" x-text="s.target_bull ? ('₹' + Number(s.target_bull).toFixed(2)) : (s.close || s.current_price) ? ('₹' + ((s.close || s.current_price) * 1.15).toFixed(2)) : '—'"></td>
                             <td class="py-2 px-2 text-right font-mono" x-text="s.market_cap?.toFixed(0) || '—'"></td>
                             <td class="py-2 px-2 text-right font-mono" x-text="s.pe_ratio?.toFixed(1) || '—'"></td>
                             <td class="py-2 px-2 text-center">
@@ -841,9 +841,9 @@ https://www.screener.in/screens/3625029/strength-with-volume/"
                                 x-text="s.rsi ? s.rsi.toFixed(1) : '—'"></td>
                             <td class="py-2 px-2 text-right font-mono" x-text="(s.dma_50 || s.sma_50) ? (s.dma_50 || s.sma_50).toFixed(2) : '—'"></td>
                             <td class="py-2 px-2 text-right font-mono" x-text="(s.dma_200 || s.sma_200) ? (s.dma_200 || s.sma_200).toFixed(2) : '—'"></td>
-                            <td class="py-2 px-2 text-right font-mono" style="color:var(--accent-blue)" x-text="s.entry_zone_low ? '₹' + s.entry_zone_low.toFixed(2) + ' - ₹' + s.entry_zone_high.toFixed(2) : '—'"></td>
-                            <td class="py-2 px-2 text-right font-mono" style="color:var(--accent-red)" x-text="s.stop_loss ? '₹' + s.stop_loss.toFixed(2) : '—'"></td>
-                            <td class="py-2 px-2 text-right font-mono" style="color:var(--accent-green)" x-text="s.target_bull ? '₹' + s.target_bull.toFixed(2) : '—'"></td>
+                            <td class="py-2 px-2 text-right font-mono" style="color:var(--accent-blue)" x-text="s.entry_zone_low ? ('₹' + Number(s.entry_zone_low).toFixed(2) + ' - ₹' + Number(s.entry_zone_high).toFixed(2)) : (s.current_price || s.close) ? ('₹' + ((s.current_price || s.close) * 0.97).toFixed(2) + ' - ₹' + (s.current_price || s.close).toFixed(2)) : '—'"></td>
+                            <td class="py-2 px-2 text-right font-mono" style="color:var(--accent-red)" x-text="s.stop_loss ? ('₹' + Number(s.stop_loss).toFixed(2)) : (s.current_price || s.close) ? ('₹' + ((s.current_price || s.close) * 0.93).toFixed(2)) : '—'"></td>
+                            <td class="py-2 px-2 text-right font-mono" style="color:var(--accent-green)" x-text="s.target_bull ? ('₹' + Number(s.target_bull).toFixed(2)) : (s.current_price || s.close) ? ('₹' + ((s.current_price || s.close) * 1.15).toFixed(2)) : '—'"></td>
                             <td class="py-2 px-2 text-right font-mono" x-text="s.volume ? (s.volume / 1000).toFixed(0) + 'K' : '—'"></td>
                             <td class="py-2 px-2 text-center">
                                 <button @click="analyzeFromResults(s.ticker, false)"

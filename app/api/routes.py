@@ -418,10 +418,19 @@ async def _run_query_screening(req: ScreenerRequest) -> Union[QueryScreenerRepor
                     try:
                         data = future.result()
                         if data:
-                            stock_details.append({
+                            close_p = data.get("close", 0) or data.get("current_price", 0)
+                            item = {
                                 "ticker": ticker,
+                                "current_price": close_p,
+                                "close": close_p,
+                                "entry_zone_low": round(close_p * 0.97, 2) if close_p else None,
+                                "entry_zone_high": round(close_p * 1.00, 2) if close_p else None,
+                                "stop_loss": round(close_p * 0.93, 2) if close_p else None,
+                                "target_bull": round(close_p * 1.15, 2) if close_p else None,
+                                "target_base": round(close_p * 1.10, 2) if close_p else None,
                                 **{k: round(v, 2) if isinstance(v, float) else v for k, v in data.items()}
-                            })
+                            }
+                            stock_details.append(item)
                     except Exception:
                         pass
         
@@ -546,10 +555,19 @@ async def _run_query_screening(req: ScreenerRequest) -> Union[QueryScreenerRepor
                     try:
                         data = future.result()
                         if data:
-                            stock_details.append({
+                            close_p = data.get("close", 0) or data.get("current_price", 0)
+                            item = {
                                 "ticker": ticker,
+                                "current_price": close_p,
+                                "close": close_p,
+                                "entry_zone_low": round(close_p * 0.97, 2) if close_p else None,
+                                "entry_zone_high": round(close_p * 1.00, 2) if close_p else None,
+                                "stop_loss": round(close_p * 0.93, 2) if close_p else None,
+                                "target_bull": round(close_p * 1.15, 2) if close_p else None,
+                                "target_base": round(close_p * 1.10, 2) if close_p else None,
                                 **{k: round(v, 2) if isinstance(v, float) else v for k, v in data.items()}
-                            })
+                            }
+                            stock_details.append(item)
                     except Exception:
                         pass
         
