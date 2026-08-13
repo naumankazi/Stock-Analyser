@@ -687,6 +687,15 @@ def prepare_stock_data(ticker: str) -> dict[str, float] | None:
         except Exception as e:
             logger.debug("Failed to fetch fundamentals for %s: %s", ticker, e)
             
+        # ── Trade Plan calculations ──
+        close_p = data.get("close", 0)
+        if close_p > 0:
+            data["entry_zone_low"] = round(close_p * 0.97, 2)
+            data["entry_zone_high"] = round(close_p * 1.00, 2)
+            data["stop_loss"] = round(close_p * 0.93, 2)
+            data["target_bull"] = round(close_p * 1.15, 2)
+            data["target_base"] = round(close_p * 1.10, 2)
+
         # Cache the result
         cache[cache_key] = data
         return data

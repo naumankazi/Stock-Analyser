@@ -278,12 +278,6 @@ async def screen(req: ScreenerRequest = ScreenerRequest()):
         if req.query or req.queries:
             return await _run_query_screening(req)
         
-        # If custom_tickers provided, route through query screening with pass-through query
-        if req.custom_tickers:
-            logger.info("Custom tickers provided - using query screening path with pass-through query")
-            req.query = "Volume >= 0"
-            return await _run_query_screening(req)
-        
         # If screener_url or screener_query provided without a query, use query-based screening
         # with a pass-through query that matches all stocks
         if req.screener_url or req.screener_urls or req.screener_query or (req.universe and req.universe != "nifty50"):
