@@ -262,6 +262,8 @@ class ScreenerReport(BaseModel):
         description="Ticker symbols ready to pass to /api/analyze"
     )
     failed_tickers: list[str] = Field(default=[], description="Tickers that failed HTTP 404 or other errors")
+    llm_enriched: Optional[list[dict]] = Field(default=None, description="LLM enrichment results if include_llm=True")
+    llm_summary: Optional[dict] = Field(default=None, description="LLM enrichment summary if include_llm=True")
     generated_at: str
 
 

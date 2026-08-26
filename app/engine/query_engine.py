@@ -562,7 +562,16 @@ def prepare_stock_data(ticker: str) -> dict[str, float] | None:
     
     if cache_key in cache:
         logger.debug("Cache hit for query data: %s", ticker)
-        return cache[cache_key]
+        cached_data = cache[cache_key]
+        if "entry_zone_low" not in cached_data:
+            close_p = cached_data.get("close", 0)
+            if close_p > 0:
+                cached_data["entry_zone_low"] = round(close_p * 0.97, 2)
+                cached_data["entry_zone_high"] = round(close_p * 1.00, 2)
+                cached_data["stop_loss"] = round(close_p * 0.93, 2)
+                cached_data["target_bull"] = round(close_p * 1.15, 2)
+                cached_data["target_base"] = round(close_p * 1.10, 2)
+        return cached_data
     
     try:
         # Resolve ticker
@@ -581,6 +590,7 @@ def prepare_stock_data(ticker: str) -> dict[str, float] | None:
         
         # ── Price fields ──
         data["close"] = float(latest.get("close", 0))
+        data["current_price"] = data["close"]
         data["open"] = float(latest.get("open", 0))
         data["high"] = float(latest.get("high", 0))
         data["low"] = float(latest.get("low", 0))
@@ -687,6 +697,15 @@ def prepare_stock_data(ticker: str) -> dict[str, float] | None:
         except Exception as e:
             logger.debug("Failed to fetch fundamentals for %s: %s", ticker, e)
             
+        # ── Trade Plan calculations ──
+        close_p = data.get("close", 0)
+        if close_p > 0:
+            data["entry_zone_low"] = round(close_p * 0.97, 2)
+            data["entry_zone_high"] = round(close_p * 1.00, 2)
+            data["stop_loss"] = round(close_p * 0.93, 2)
+            data["target_bull"] = round(close_p * 1.15, 2)
+            data["target_base"] = round(close_p * 1.10, 2)
+
         # Cache the result
         cache[cache_key] = data
         return data

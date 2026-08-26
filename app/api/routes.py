@@ -278,30 +278,63 @@ async def screen(req: ScreenerRequest = ScreenerRequest()):
         if req.query or req.queries:
             return await _run_query_screening(req)
         
-        # If custom_tickers provided, route through query screening with pass-through query
-        if req.custom_tickers:
-            logger.info("Custom tickers provided - using query screening path with pass-through query")
-            req.query = "Volume >= 0"
-            return await _run_query_screening(req)
-        
         # If screener_url or screener_query provided without a query, use query-based screening
         # with a pass-through query that matches all stocks
-        if req.screener_url or req.screener_urls or req.screener_query or (req.universe and req.universe != "nifty50"):
+        if (req.screener_url or req.screener_urls or req.screener_query or (req.universe and req.universe != "nifty50")) and not req.custom_tickers:
             logger.info("Using screener_url/screener_urls/screener_query/universe without query - applying pass-through query")
             # Create a pass-through query that matches all stocks
             req.query = "Volume >= 0"
             return await _run_query_screening(req)
         
-        # If LLM enrichment requested, route through query screening with pass-through query
-        if req.include_llm:
-            logger.info("LLM enrichment requested - using query screening path with pass-through query")
+        # If LLM enrichment requested WITHOUT custom_tickers, route through query screening
+        if req.include_llm and not req.custom_tickers:
+            logger.info("LLM enrichment requested without custom_tickers - using query screening path with pass-through query")
             req.query = "Volume >= 0"
             if not req.universe:
                 req.universe = "nse100"  # Default universe (100 stocks from STOCK_UNIVERSE)
             return await _run_query_screening(req)
         
-        # Fall back to traditional multi-factor screening
+        # Traditional multi-factor screening (for default universe or custom_tickers)
         report = run_screener(req)
+        
+        # Enrich multi-factor top picks with LLM if AI analysis toggled on
+        if req.include_llm and report and report.top_picks:
+            try:
+                top_tickers = [p["ticker"] for p in report.top_picks[:req.llm_max_stocks]]
+                stock_details = []
+                for ticker in top_tickers:
+                    data = prepare_stock_data(ticker)
+                    if data:
+                        stock_details.append({
+                            "ticker": ticker,
+                            **{k: round(v, 2) if isinstance(v, float) else v for k, v in data.items()}
+                        })
+                if stock_details:
+                    selected_stocks, duplicates = select_stocks_for_enrichment(
+                        {"duplicates": [], "ordered": top_tickers},
+                        stock_details,
+                        max_stocks=req.llm_max_stocks
+                    )
+                    enriched_stocks = await enrich_stocks(selected_stocks, duplicates=duplicates)
+                    enriched_sorted = sort_by_verdict(enriched_stocks)
+                    
+                    verdicts = {}
+                    stages = {}
+                    for s in enriched_sorted:
+                        v = s.get("llm", {}).get("verdict", "UNKNOWN")
+                        verdicts[v] = verdicts.get(v, 0) + 1
+                        st = s.get("llm", {}).get("stage", "UNKNOWN")
+                        stages[st] = stages.get(st, 0) + 1
+                    
+                    report.llm_enriched = [s for s in enriched_sorted if s.get("llm")]
+                    report.llm_summary = {
+                        "total_enriched": len(report.llm_enriched),
+                        "verdicts": verdicts,
+                        "stages": stages
+                    }
+            except Exception as e:
+                logger.warning("Failed to enrich screener report with LLM: %s", e)
+
         return report
         
     except HTTPException:
@@ -385,10 +418,20 @@ async def _run_query_screening(req: ScreenerRequest) -> Union[QueryScreenerRepor
                     try:
                         data = future.result()
                         if data:
-                            stock_details.append({
+                            raw_item = {k: round(v, 2) if isinstance(v, float) else v for k, v in data.items()}
+                            close_p = raw_item.get("close", 0) or raw_item.get("current_price", 0)
+                            item = {
+                                **raw_item,
                                 "ticker": ticker,
-                                **{k: round(v, 2) if isinstance(v, float) else v for k, v in data.items()}
-                            })
+                                "current_price": close_p,
+                                "close": close_p,
+                                "entry_zone_low": raw_item.get("entry_zone_low") or (round(close_p * 0.97, 2) if close_p else None),
+                                "entry_zone_high": raw_item.get("entry_zone_high") or (round(close_p * 1.00, 2) if close_p else None),
+                                "stop_loss": raw_item.get("stop_loss") or (round(close_p * 0.93, 2) if close_p else None),
+                                "target_bull": raw_item.get("target_bull") or (round(close_p * 1.15, 2) if close_p else None),
+                                "target_base": raw_item.get("target_base") or (round(close_p * 1.10, 2) if close_p else None),
+                            }
+                            stock_details.append(item)
                     except Exception:
                         pass
         
@@ -513,10 +556,20 @@ async def _run_query_screening(req: ScreenerRequest) -> Union[QueryScreenerRepor
                     try:
                         data = future.result()
                         if data:
-                            stock_details.append({
+                            raw_item = {k: round(v, 2) if isinstance(v, float) else v for k, v in data.items()}
+                            close_p = raw_item.get("close", 0) or raw_item.get("current_price", 0)
+                            item = {
+                                **raw_item,
                                 "ticker": ticker,
-                                **{k: round(v, 2) if isinstance(v, float) else v for k, v in data.items()}
-                            })
+                                "current_price": close_p,
+                                "close": close_p,
+                                "entry_zone_low": raw_item.get("entry_zone_low") or (round(close_p * 0.97, 2) if close_p else None),
+                                "entry_zone_high": raw_item.get("entry_zone_high") or (round(close_p * 1.00, 2) if close_p else None),
+                                "stop_loss": raw_item.get("stop_loss") or (round(close_p * 0.93, 2) if close_p else None),
+                                "target_bull": raw_item.get("target_bull") or (round(close_p * 1.15, 2) if close_p else None),
+                                "target_base": raw_item.get("target_base") or (round(close_p * 1.10, 2) if close_p else None),
+                            }
+                            stock_details.append(item)
                     except Exception:
                         pass
         
