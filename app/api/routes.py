@@ -297,10 +297,15 @@ async def screen(req: ScreenerRequest = ScreenerRequest()):
         # Traditional multi-factor screening (for default universe or custom_tickers)
         report = run_screener(req)
         
-        # Enrich multi-factor top picks with LLM if AI analysis toggled on
-        if req.include_llm and report and report.top_picks:
+        # Enrich multi-factor screened stocks with LLM if AI analysis toggled on
+        if req.include_llm and report and (report.stocks or report.top_picks):
             try:
-                top_tickers = [p["ticker"] for p in report.top_picks[:req.llm_max_stocks]]
+                source_list = report.stocks if report.stocks else report.top_picks
+                top_tickers = [
+                    (item.ticker if hasattr(item, "ticker") else item.get("ticker"))
+                    for item in source_list[:req.llm_max_stocks]
+                    if (hasattr(item, "ticker") or (isinstance(item, dict) and item.get("ticker")))
+                ]
                 stock_details = []
                 for ticker in top_tickers:
                     data = prepare_stock_data(ticker)

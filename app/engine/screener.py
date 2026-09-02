@@ -208,55 +208,64 @@ def _safe_get(info: dict, *keys, default=None) -> Any:
     return default
 
 
-def _fetch_fundamentals(ticker: str) -> dict[str, Any] | None:
-    """Fetch fundamental data for a single ticker via yfinance."""
+def _fetch_fundamentals(ticker: str, retries: int = 2) -> dict[str, Any] | None:
+    """Fetch fundamental data for a single ticker via yfinance with retries."""
     cache = get_analysis_cache()
     cache_key = f"screener_fund|{ticker}"
     if cache_key in cache:
         return cache[cache_key]
 
-    try:
-        tk = yf.Ticker(ticker)
-        info = tk.info
-        if not info or info.get("regularMarketPrice") is None and info.get("currentPrice") is None:
-            return None
+    for attempt in range(1, retries + 2):
+        try:
+            tk = yf.Ticker(ticker)
+            info = tk.info
+            if not info or (info.get("regularMarketPrice") is None and info.get("currentPrice") is None):
+                if attempt <= retries:
+                    import time; time.sleep(0.5 * attempt)
+                    continue
+                return None
 
-        price = _safe_get(info, "currentPrice", "regularMarketPrice", default=0)
-        market_cap = _safe_get(info, "marketCap", default=0)
-        pe = _safe_get(info, "trailingPE", "forwardPE")
-        peg = _safe_get(info, "pegRatio")
-        de = _safe_get(info, "debtToEquity")
-        roe = _safe_get(info, "returnOnEquity")
-        op_margin = _safe_get(info, "operatingMargins")
-        rev_growth = _safe_get(info, "revenueGrowth")
-        earnings_growth = _safe_get(info, "earningsGrowth")
-        fcf = _safe_get(info, "freeCashflow", default=0)
-        profit_margin = _safe_get(info, "profitMargins")
-        beta = _safe_get(info, "beta", default=1.0)
+            price = _safe_get(info, "currentPrice", "regularMarketPrice", default=0)
+            market_cap = _safe_get(info, "marketCap", default=0)
+            pe = _safe_get(info, "trailingPE", "forwardPE")
+            peg = _safe_get(info, "pegRatio")
+            de = _safe_get(info, "debtToEquity")
+            roe = _safe_get(info, "returnOnEquity")
+            op_margin = _safe_get(info, "operatingMargins")
+            rev_growth = _safe_get(info, "revenueGrowth")
+            earnings_growth = _safe_get(info, "earningsGrowth")
+            fcf = _safe_get(info, "freeCashflow", default=0)
+            profit_margin = _safe_get(info, "profitMargins")
+            beta = _safe_get(info, "beta", default=1.0)
 
-        result = {
-            "price": float(price) if price else 0,
-            "market_cap": float(market_cap) if market_cap else 0,
-            "market_cap_cr": round(float(market_cap) / 1e7, 2) if market_cap else None,
-            "pe_ratio": round(float(pe), 2) if pe else None,
-            "peg_ratio": round(float(peg), 2) if peg else None,
-            "debt_to_equity": round(float(de) / 100, 2) if de else None,  # yfinance gives D/E as percentage
-            "roe_pct": round(float(roe) * 100, 2) if roe else None,
-            "operating_margin_pct": round(float(op_margin) * 100, 2) if op_margin else None,
-            "revenue_growth_pct": round(float(rev_growth) * 100, 2) if rev_growth else None,
-            "earnings_growth_pct": round(float(earnings_growth) * 100, 2) if earnings_growth else None,
-            "free_cash_flow": float(fcf) if fcf else 0,
-            "free_cash_flow_cr": round(float(fcf) / 1e7, 2) if fcf else None,
-            "profit_margin_pct": round(float(profit_margin) * 100, 2) if profit_margin else None,
-            "beta": round(float(beta), 2) if beta else 1.0,
-        }
+            result = {
+                "price": float(price) if price else 0,
+                "market_cap": float(market_cap) if market_cap else 0,
+                "market_cap_cr": round(float(market_cap) / 1e7, 2) if market_cap else None,
+                "pe_ratio": round(float(pe), 2) if pe else None,
+                "peg_ratio": round(float(peg), 2) if peg else None,
+                "debt_to_equity": round(float(de) / 100, 2) if de else None,  # yfinance gives D/E as percentage
+                "roe_pct": round(float(roe) * 100, 2) if roe else None,
+                "operating_margin_pct": round(float(op_margin) * 100, 2) if op_margin else None,
+                "revenue_growth_pct": round(float(rev_growth) * 100, 2) if rev_growth else None,
+                "earnings_growth_pct": round(float(earnings_growth) * 100, 2) if earnings_growth else None,
+                "free_cash_flow": float(fcf) if fcf else 0,
+                "free_cash_flow_cr": round(float(fcf) / 1e7, 2) if fcf else None,
+                "profit_margin_pct": round(float(profit_margin) * 100, 2) if profit_margin else None,
+                "beta": round(float(beta), 2) if beta else 1.0,
+            }
 
-        cache[cache_key] = result
-        return result
+            cache[cache_key] = result
+            return result
 
-    except Exception as e:
-        logger.warning("Failed to fetch fundamentals for %s: %s", ticker, e)
-        return None
+        except Exception as e:
+            logger.warning("Attempt %d failed to fetch fundamentals for %s: %s", attempt, ticker, e)
+            if attempt <= retries:
+                import time; time.sleep(0.5 * attempt)
+            else:
+                return None
+
+    return None
 
 
 def _compute_composite_score(
@@ -657,7 +666,7 @@ def run_screener(req: ScreenerRequest) -> ScreenerReport:
     logger.info("Screener request received: capital=%.0f, top_n=%d, max_risk_pct=%.1f, custom_tickers=%s", 
                 req.capital, req.top_n, req.max_risk_pct, req.custom_tickers or "None")
     
-    cache_key = f"screener|{req.capital}|{req.top_n}|{req.max_risk_pct}|{req.custom_tickers or 'default'}"
+    cache_key = f"screener_v2|{req.capital}|{req.top_n}|{req.max_risk_pct}|{req.include_llm}|{req.llm_max_stocks}|{req.custom_tickers or 'default'}"
     if cache_key in cache:
         logger.info("Screener cache hit")
         return cache[cache_key]
@@ -769,10 +778,11 @@ def run_screener(req: ScreenerRequest) -> ScreenerReport:
         "note": f"Risk-weighted allocation across {len(top_stocks)} stocks with {req.max_risk_pct}% max downside per position",
     }
 
-    # Top 3 picks
-    top_3 = top_stocks[:3]
+    # Top picks (minimum 5, or up to req.llm_max_stocks if include_llm is enabled)
+    num_picks = max(5, min(req.llm_max_stocks, len(top_stocks))) if req.include_llm else 5
+    top_candidates = top_stocks[:num_picks]
     top_picks = []
-    for i, s in enumerate(top_3, 1):
+    for i, s in enumerate(top_candidates, 1):
         reasons = []
         if s.composite_score >= 65:
             reasons.append(f"High composite score ({s.composite_score})")
