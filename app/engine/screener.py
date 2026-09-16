@@ -507,10 +507,10 @@ def _process_single_stock(
     sector_pe: float,
     max_risk_pct: float,
 ) -> tuple[ScreenedStock | None, str | None]:
-    """Process a single stock and return (candidate, error_ticker).
+    """Process a single stock and return (candidate, failure_reason).
     
     Returns:
-        Tuple of (ScreenedStock or None, failed_ticker or None)
+        A candidate and optional data failure reason (including partial failures).
     """
     ticker = stock_info["ticker"]
     company_name = stock_info["name"]
@@ -520,15 +520,19 @@ def _process_single_stock(
         fund = _fetch_fundamentals(ticker)
         if not fund or fund["price"] <= 0:
             logger.warning("Skipping %s — no data", ticker)
-            return None, None
+            return None, "No fundamental data or valid price available"
 
         # Fetch technical trend (2 years of daily data)
+        failure_reason = None
         try:
             daily_df = fetch_historical(ticker, period="2y", interval="1d")
+            if daily_df.empty:
+                raise ValueError("No historical data available")
             trend = analyse_trend(daily_df)
             rsi_data = compute_rsi(daily_df)
             rsi_val = rsi_data["rsi"]
-        except Exception:
+        except Exception as e:
+            failure_reason = f"Technical data unavailable; neutral defaults used: {e}"
             trend = "neutral"
             rsi_val = 50.0
 
@@ -621,15 +625,12 @@ def _process_single_stock(
             growth_outlook=growth_outlook,
             risk_factors=risk_factors,
         )
-        return candidate, None
+        return candidate, failure_reason
 
     except Exception as e:
         error_msg = str(e)
         logger.warning("Error screening %s: %s", ticker, error_msg)
-        # Track 404 errors (ticker not found)
-        if "404" in error_msg or "not found" in error_msg.lower():
-            return None, ticker
-        return None, None
+        return None, error_msg
 
 
 def _get_stock_universe_for_screening(custom_tickers: str | None) -> list[dict[str, str]]:
@@ -666,7 +667,7 @@ def run_screener(req: ScreenerRequest) -> ScreenerReport:
     logger.info("Screener request received: capital=%.0f, top_n=%d, max_risk_pct=%.1f, custom_tickers=%s", 
                 req.capital, req.top_n, req.max_risk_pct, req.custom_tickers or "None")
     
-    cache_key = f"screener_v2|{req.capital}|{req.top_n}|{req.max_risk_pct}|{req.include_llm}|{req.llm_max_stocks}|{req.custom_tickers or 'default'}"
+    cache_key = f"screener_v3|{req.capital}|{req.top_n}|{req.max_risk_pct}|{req.include_llm}|{req.llm_max_stocks}|{req.custom_tickers or 'default'}"
     if cache_key in cache:
         logger.info("Screener cache hit")
         return cache[cache_key]
@@ -675,6 +676,7 @@ def run_screener(req: ScreenerRequest) -> ScreenerReport:
 
     all_candidates: list[ScreenedStock] = []
     failed_tickers: list[str] = []
+    failure_reasons: dict[str, str] = {}
 
     # Get screening universe
     stocks_to_screen = _get_stock_universe_for_screening(req.custom_tickers)
@@ -714,7 +716,7 @@ def run_screener(req: ScreenerRequest) -> ScreenerReport:
     
     # ── Process stocks in parallel ──
     logger.info("Processing %d stocks in parallel...", len(jobs))
-    max_workers = min(20, len(jobs))  # Cap at 20 parallel requests
+    max_workers = max(1, min(20, len(jobs)))
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all jobs
@@ -733,13 +735,16 @@ def run_screener(req: ScreenerRequest) -> ScreenerReport:
         for future in as_completed(futures):
             ticker = futures[future]
             try:
-                candidate, error_ticker = future.result()
+                candidate, failure_reason = future.result()
                 if candidate is not None:
                     all_candidates.append(candidate)
-                if error_ticker is not None:
-                    failed_tickers.append(error_ticker)
+                if failure_reason is not None:
+                    failure_reasons[ticker] = failure_reason
             except Exception as e:
                 logger.warning("Parallel processing error for %s: %s", ticker, e)
+                failure_reasons[ticker] = str(e)
+
+    failed_tickers = sorted(failure_reasons)
     
     logger.info("Parallel processing complete. %d candidates found.", len(all_candidates))
 
@@ -849,6 +854,7 @@ def run_screener(req: ScreenerRequest) -> ScreenerReport:
         top_picks=top_picks,
         tickers_for_analysis=tickers_for_analysis,
         failed_tickers=failed_tickers,
+        failure_reasons=failure_reasons,
         generated_at=datetime.now(timezone.utc).isoformat(),
     )
 

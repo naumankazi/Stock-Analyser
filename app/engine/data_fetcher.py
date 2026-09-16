@@ -388,6 +388,16 @@ def fetch_quote(ticker: str) -> dict[str, Any]:
             "prev_close": info.get("previousClose") or info.get("regularMarketPreviousClose") or 0,
             "volume": info.get("volume") or info.get("regularMarketVolume") or 0,
             "market_cap": info.get("marketCap"),
+            "market_time": info.get("regularMarketTime"),
+            "fetched_at": pd.Timestamp.now(tz="UTC").isoformat(),
+            "sector": info.get("sector"),
+            "fundamentals": {
+                key: info.get(key) for key in (
+                    "marketCap", "revenueGrowth", "earningsQuarterlyGrowth", "returnOnEquity",
+                    "returnOnCapitalEmployed", "debtToEquity", "trailingPE", "forwardPE",
+                    "heldPercentInsiders", "lastSplitDate", "lastSplitFactor",
+                )
+            },
         }
 
         # Compute change from prev_close if API didn't supply it

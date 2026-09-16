@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import hashlib
 import logging
 import os
 from datetime import date
@@ -386,7 +387,8 @@ IMPORTANT: Return ONLY the JSON object, no markdown formatting, no explanations.
 
 # ── LLM Call Function ────────────────────────────────────────────────────────
 
-async def call_llm(payload: dict, client: httpx.AsyncClient) -> Optional[dict]:
+async def call_llm(payload: dict, client: httpx.AsyncClient, *, prompt_override: str | None = None,
+                   response_model=None, max_tokens: int = 1000, timeout_seconds: float | None = None) -> Optional[dict]:
     """Call LLM API with structured payload.
     
     Args:
@@ -404,11 +406,15 @@ async def call_llm(payload: dict, client: httpx.AsyncClient) -> Optional[dict]:
     
     # Check cache first
     cache_key = f"llm:{stock}:{date.today().isoformat()}"
+    if prompt_override is not None:
+        # A full swing assessment must not reuse the screener verdict or another data snapshot.
+        digest = hashlib.sha256((LLM_MODEL + prompt_override).encode()).hexdigest()
+        cache_key = f"swing:{stock}:{digest}"
     if cache_key in _llm_cache:
         logger.debug("LLM cache hit for %s", stock)
         return _llm_cache[cache_key]
     
-    prompt = build_prompt(payload)
+    prompt = prompt_override if prompt_override is not None else build_prompt(payload)
     
     try:
         # Build request based on provider
@@ -424,7 +430,7 @@ async def call_llm(payload: dict, client: httpx.AsyncClient) -> Optional[dict]:
                     {"role": "user", "content": prompt}
                 ],
                 "temperature": LLM_TEMPERATURE,
-                "max_tokens": 1000,
+                "max_tokens": max_tokens,
             }
             # Azure URL: {base}/openai/deployments/{deployment}/chat/completions?api-version={version}
             base = LLM_BASE_URL.rstrip('/')
@@ -442,7 +448,7 @@ async def call_llm(payload: dict, client: httpx.AsyncClient) -> Optional[dict]:
                     {"role": "user", "content": prompt}
                 ],
                 "temperature": LLM_TEMPERATURE,
-                "max_tokens": 1000,
+                "max_tokens": max_tokens,
             }
             url = f"{LLM_BASE_URL.rstrip('/')}/chat/completions"
             
@@ -454,7 +460,7 @@ async def call_llm(payload: dict, client: httpx.AsyncClient) -> Optional[dict]:
             }
             request_body = {
                 "model": LLM_MODEL,
-                "max_tokens": 1000,
+                "max_tokens": max_tokens,
                 "temperature": LLM_TEMPERATURE,
                 "messages": [
                     {"role": "user", "content": prompt}
@@ -469,7 +475,7 @@ async def call_llm(payload: dict, client: httpx.AsyncClient) -> Optional[dict]:
             url,
             headers=headers,
             json=request_body,
-            timeout=LLM_TIMEOUT,
+            timeout=timeout_seconds if timeout_seconds is not None else LLM_TIMEOUT,
         )
         response.raise_for_status()
         
@@ -501,7 +507,9 @@ async def call_llm(payload: dict, client: httpx.AsyncClient) -> Optional[dict]:
             return None
         
         required_keys = {"verdict", "confidence", "stage", "thesis", "risk_flags"}
-        if not required_keys.issubset(result.keys()):
+        if response_model is not None:
+            result = response_model.model_validate(result).model_dump()
+        elif not required_keys.issubset(result.keys()):
             logger.warning("LLM response missing required keys for %s", stock)
             return None
         

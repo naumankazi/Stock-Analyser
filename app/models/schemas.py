@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Optional
 
 from pydantic import BaseModel, Field
+from app.models.swing import SwingAnalysis
 
 
 # ── Request ──────────────────────────────────────────────────
@@ -15,6 +16,8 @@ from pydantic import BaseModel, Field
 class AnalysisRequest(BaseModel):
     ticker: str = Field(..., min_length=1, max_length=30, description="Stock ticker symbol")
     position: Optional[str] = Field(None, description="Current position: long, short, or none")
+    trading_capital: Optional[float] = Field(None, gt=0, allow_inf_nan=False, description="Available capital in the stock's quote currency")
+    risk_pct: Optional[float] = Field(None, gt=0, le=100, allow_inf_nan=False, description="Maximum account risk percentage per trade")
     include_llm: bool = Field(
         default=False,
         description="Whether to include LLM analysis for this stock"
@@ -144,6 +147,10 @@ class TradeLevels(BaseModel):
 # ── Main Response ────────────────────────────────────────────
 
 class AnalysisReport(BaseModel):
+    swing_data: dict = Field(default_factory=dict)
+    swing_analysis: Optional[SwingAnalysis] = None
+    swing_analysis_status: str = "not_requested"
+    swing_analysis_error: Optional[str] = None
     meta: Meta
     price_snapshot: PriceSnapshot
     trend_structure: TrendStructure
@@ -212,7 +219,7 @@ class ScreenerRequest(BaseModel):
         15,
         ge=1,
         le=30,
-        description="Maximum number of stocks to enrich with LLM analysis. Prioritizes duplicates (multi-query matches) first."
+        description="Maximum stocks for AI analysis (1–30). Query screening selects usable stocks in source-list order, independently of filter matches and top_n."
     )
 
 
@@ -262,6 +269,7 @@ class ScreenerReport(BaseModel):
         description="Ticker symbols ready to pass to /api/analyze"
     )
     failed_tickers: list[str] = Field(default=[], description="Tickers that failed HTTP 404 or other errors")
+    failure_reasons: dict[str, str] = Field(default_factory=dict)
     llm_enriched: Optional[list[dict]] = Field(default=None, description="LLM enrichment results if include_llm=True")
     llm_summary: Optional[dict] = Field(default=None, description="LLM enrichment summary if include_llm=True")
     generated_at: str
@@ -283,6 +291,8 @@ class QueryResultItem(BaseModel):
 
 class QueryScreenerReport(BaseModel):
     """Response for query-based stock screening."""
+    failed_tickers: list[str] = Field(default_factory=list, description="All tickers with data preparation failures")
+    failure_reasons: dict[str, str] = Field(default_factory=dict)
     mode: str = Field(
         description="Screening mode: 'single_query' or 'multi_query'"
     )

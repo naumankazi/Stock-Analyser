@@ -42,9 +42,54 @@ Enter a stock ticker (e.g. `AAPL`, `RELIANCE.NS`, `TCS.BO`) and the system:
 2. **Computes 15+ technical indicators** from scratch using `pandas` and `numpy` — no TA libraries
 3. **Generates a structured analysis report** with 10 sections covering trend, momentum, volume, volatility, support/resistance, Fibonacci, chart patterns, quant scores, derived signals, and trade levels
 4. **Renders an interactive candlestick chart** using TradingView's Lightweight Charts with overlaid moving averages, Bollinger Bands, support/resistance lines, and trade level markers
-5. **Computes probabilistic target confidence** using a 7-factor institutional model (trend, momentum, volume, volatility feasibility, distance decay, trend maturity, market regime)
+5. **Shows observed swing structure and risk/reward**, with technical-stop and position-size arithmetic checked by the server
 6. **Returns everything as a single JSON API response** — optimized for both human display and LLM consumption
-7. **Optional AI-powered analysis** — Enable LLM enrichment for structured insights including verdict (BUY/WATCHLIST/HOLD/AVOID), confidence score, trend stage, investment thesis, and entry strategy
+7. **Optional swing-entry AI assessment** — Uses [swingTradingPrompt.md](swingTradingPrompt.md), with all 14 sections, four setup assessments, a final decision table and six closing questions
+
+### Single-stock swing framework
+
+On Technical Analysis, enable **AI Analysis**, optionally enter trading capital in
+the stock's quote currency and the account risk percentage, and run the ticker.
+`POST /api/analyze` accepts `trading_capital` and `risk_pct` alongside `include_llm`.
+
+The response adds `swing_data`, `swing_analysis`, `swing_analysis_status` and
+`swing_analysis_error`. Market evidence remains visible if AI is off or fails.
+The UI uses this swing plan instead of the older 3–6 month trade-level display.
+The legacy `trade_levels` API field remains for compatibility; it is not the new
+swing-entry decision or the source of its stops and targets.
+
+| Area | Added evidence / UI |
+|---|---|
+| Market data | Dated quote/session, 10/20 EMA, 50/200 DMA, RSI, ATR, 52-week prices, volume averages, returns and extension distances |
+| Stage / entry | Stage-2 checklist, extension risk, breakout, retest, flag and EMA-pullback assessments |
+| Structure / risk | Confirmed pivots and observed ranges with reasons; technical stop, risk/share, stop classification and three target areas with reward/risk |
+| Management | +5% review, partial-profit plan, chosen trailing method, full-exit and failed-breakout/re-entry conditions |
+| Position size | Risk-based quantity capped by capital; missing inputs produce explicitly illustrative 0.5%, 0.75%, 1% scenarios |
+| Context | Date-aligned Nifty and supported sector comparisons, volume behaviour, fundamental sanity check, upcoming provider events and dated news links |
+| Final assessment | One primary decision, complete decision table, all 14 narrative sections and six final answers |
+
+Indicators use the latest available daily bars. Volume compares the current session
+with the preceding 20 sessions; intraday volume is partial. Returns use 21 and 63
+sessions and benchmarks align on shared trading dates. 52-week extrema use the
+latest 365-calendar-day window. Quotes may be delayed and caches are disclosed.
+An entry-now classification requires a quote timestamp no more than 30 minutes old
+and a recent daily session; outside market hours the report may recommend waiting.
+
+ROCE is never replaced by ROE in this report. Promoter holding/pledging,
+sector/historical P/E, board meetings, bonuses and complete future corporate-action
+coverage are marked unavailable when the configured feed cannot verify them.
+News headlines are provider evidence, not independently verified event clearance.
+The AI receives the full prompt and observed facts; it has no browsing tool.
+
+The server checks stop anchors/target prices against observed structure, recalculates
+risk and target ratios, and blocks entry classifications with insufficient Stage-2
+evidence, excessive extension, excessive stop distance or unattractive reward/risk.
+Unsupported targets remain unavailable instead of being fabricated to fill a table.
+Scores are qualitative, not calibrated probabilities. Missing AI credentials or
+invalid AI output show a visible status without a manufactured assessment.
+
+Offline verification: `python -m unittest discover -s tests -v` and
+`node --test tests/test_ui.cjs`.
 
 ### Feature 2: Query Filter
 
@@ -612,7 +657,7 @@ Supports arithmetic expressions, multiple conditions with AND logic, and multi-q
 | **Price** | Current price, Close, Open, High, Low, 52 week high/low | ✅ Always |
 | **Moving Averages** | DMA 50, DMA 200, SMA 50, SMA 200 | ✅ Always (computed) |
 | **Momentum** | RSI | ✅ Always (computed) |
-| **Volume** | Volume, Volume 1week average | ✅ Always |
+| **Volume** | Volume, Volume 1week average, Volume 1 month average | Monthly average requires 21 trading sessions |
 | **Returns** | Return over 3months | ✅ Always (computed) |
 | **Valuation** | Price to earning, PEG ratio, Market Capitalization | ⚠️ Usually available |
 | **Financial Health** | Debt to equity, ROE, ROCE, Operating margin | ⚠️ Often available |
@@ -928,11 +973,24 @@ curl http://localhost:8000/api/screen/universes
 | Return on capital employed | ROCE |
 | Return over 3months | 3 month return, 3m return |
 | Volume 1week average | Avg volume, Average volume |
+| Volume 1 month average | Volume 1month average |
 | YOY Quarterly profit growth | Earnings growth |
 | High price | High |
 | Low price | Low |
 
+`Volume 1 month average` is the mean daily volume over the latest 21 trading
+sessions, including the latest session. For example, use
+`Volume > 1.5 * Volume 1 month average` to filter for volume above that average.
+The field is unavailable when there are fewer than 21 sessions or missing volumes
+in the window.
+
 ### Debugging Failed Queries
+
+All three pages show stock data failures with symbols, reasons, and actions to
+retry analysis, edit a ticker, or look it up on Yahoo Finance. Screening responses
+include the full `failed_tickers` list and a `failure_reasons` map, independently
+of the result limit. These are separate from stocks that simply do not match a
+filter. Partial technical-data failures in the Stock Screener are also reported.
 
 When no stocks match, check the `skipped_tickers` field in the response:
 
@@ -1067,7 +1125,13 @@ The LLM enrichment layer automatically classifies stocks with tags based on thei
 
 ### Multi-Query Mode with LLM
 
-In multi-query mode, stocks appearing in multiple queries are prioritized for LLM enrichment:
+In both single- and multi-query mode, AI analyzes up to `llm_max_stocks` usable
+stocks from the source list in its original order (custom tickers, imported
+Screener.in stocks, or the selected universe). Selection is independent of query
+matches and the `top_n` / Max Results setting. Unavailable stocks are reported and
+skipped, with the next usable stocks filling the requested count. A stock is sent
+to AI at most once per run. Matching multiple queries still adds the duplicate
+tag, but does not change AI selection order or increase the requested count.
 
 ```bash
 curl -X POST http://localhost:8000/api/screen \
@@ -1528,7 +1592,7 @@ The dashboard supports **three integrated modes** with seamless transitions:
   - All NSE / F&O (~500 stocks)
   - Nifty 500, Nifty 200, Nifty 100, Nifty 50
   - Shariah-38 (default compliant universe)
-- **LLM Enrichment Toggle**: Enable AI analysis for top matched stocks
+- **LLM Enrichment Toggle**: Analyze the requested top N usable stocks from the source list, independently of filter matches
 - **LLM Max Stocks Setting**: Configure how many stocks to enrich (1-30)
 - **Available Fields Reference**: Expandable documentation of all supported fields
 - **Progress Indicator**: Step-by-step progress during parallel data fetching

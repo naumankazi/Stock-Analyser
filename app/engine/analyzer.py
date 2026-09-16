@@ -52,7 +52,7 @@ def run_analysis(ticker: str, position: str | None = None) -> AnalysisReport:
 
     # Check cache
     cache = get_analysis_cache()
-    cache_key = f"analysis|{ticker}"
+    cache_key = f"analysis_v2|{ticker}"
     if cache_key in cache:
         logger.info("Analysis cache hit for %s", ticker)
         return cache[cache_key]
@@ -96,8 +96,10 @@ def run_analysis(ticker: str, position: str | None = None) -> AnalysisReport:
 
     try:
         # --- 52-week high/low distances ---
-        high_52w = float(daily_df["high"].max())
-        low_52w = float(daily_df["low"].min())
+        import pandas as pd
+        recent_year = daily_df[daily_df["date"] > daily_df["date"].max() - pd.Timedelta(days=365)]
+        high_52w = float(recent_year["high"].max())
+        low_52w = float(recent_year["low"].min())
         dist_52w_high = round(((current_price - high_52w) / high_52w) * 100, 2) if high_52w else 0
         dist_52w_low = round(((current_price - low_52w) / low_52w) * 100, 2) if low_52w else 0
 

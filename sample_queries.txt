@@ -13,52 +13,16 @@
 # ══════════════════════════════════════════════════════════════
 
 
-# ──────────────────────────────────────────────────────────────
-# QUERY 1: Growth Momentum (Above 200 DMA with earnings growth)
-# ──────────────────────────────────────────────────────────────
-# Original:
-#   Market Capitalization > 500 AND Current price > 1.05 * DMA 200 
-#   AND RSI > 50 AND RSI < 70 AND YOY Quarterly profit growth > 10 
-#   AND Price to earning < 30
-#
-# Corrected version (single line for API):
+# QUERY 1: Growth Momentum
+Market Capitalization > 500 AND Current price > DMA 50 AND DMA 50 > DMA 200 AND Current price > DMA 200 AND Current price < 1.12 * DMA 50 AND RSI > 52 AND RSI < 68 AND YOY Quarterly profit growth > 10 AND YOY Quarterly sales growth > 8 AND Return on capital employed > 15 AND Debt to equity < 1
 
-Market Capitalization > 500 AND Current price > 1.05 * DMA 200 AND RSI > 50 AND RSI < 70 AND Earnings growth > 10 AND Price to earning < 30
+# QUERY 2: Quality + Momentum
+Market Capitalization > 500 AND Return over 3months > 10 AND Return over 3months < 45 AND Volume 1week average > 50000 AND Volume 1week average > Volume 1month average AND Return on capital employed > 15 AND Debt to equity < 1 AND Current price > DMA 50 AND DMA 50 > DMA 200 AND Current price < 1.10 * DMA 50 AND RSI > 50 AND RSI < 70
 
-
-# ──────────────────────────────────────────────────────────────
-# QUERY 2: Near 52-Week High with Price Doubled from Low
-# ──────────────────────────────────────────────────────────────
-# Original:
-#   100*((High price - Current price)/High price) < 5 AND
-#   100*((High price - Current price)/High price) > 0 AND
-#   100*(Current price / Low price - 1) > 100 AND
-#   Current price > 120 AND Volume > 100000
-#
-# NOTE: "High price" and "Low price" refer to DAILY high/low.
-#       For 52-week high/low, use "52 week high" and "52 week low"
-#
-# Corrected version for 52-WEEK (recommended):
-
+# QUERY 3: Near 52-Week High
 100 * ((52 week high - Current price) / 52 week high) < 5 AND 100 * ((52 week high - Current price) / 52 week high) > 0 AND 100 * (Current price / 52 week low - 1) > 100 AND Current price > 120 AND Volume > 100000
 
-# Corrected version for DAILY high/low (if that's what you meant):
-
-100 * ((High price - Current price) / High price) < 5 AND 100 * ((High price - Current price) / High price) > 0 AND 100 * (Current price / Low price - 1) > 100 AND Current price > 120 AND Volume > 100000
-
-
-# ──────────────────────────────────────────────────────────────
-# QUERY 3: Quality + Momentum (ROCE + Low Debt + Above 50 DMA)
-# ──────────────────────────────────────────────────────────────
-# Original:
-#   Market Capitalization > 500 AND Return over 3months > 10 
-#   AND Volume 1week average > 50000 AND Return on capital employed > 15 
-#   AND Debt to equity < 1 AND Current price > DMA 50
-#
-# Corrected version:
-
-Market Capitalization > 500 AND Return over 3 months > 10 AND Volume 1 week average > 50000 AND ROCE > 15 AND Debt to equity < 1 AND Current price > DMA 50
-
+# Monthly average volume uses 21 trading sessions.
 
 # ══════════════════════════════════════════════════════════════
 # AVAILABLE FIELD NAMES (case-insensitive)
