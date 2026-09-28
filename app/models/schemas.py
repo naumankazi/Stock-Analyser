@@ -175,7 +175,7 @@ class ScreenerRequest(BaseModel):
     capital: float = Field(100000, description="Investment capital in INR")
     max_risk_pct: float = Field(7.0, description="Maximum downside risk per stock (%)")
     horizon_months: int = Field(12, description="Investment horizon in months")
-    top_n: int = Field(10, ge=1, le=100, description="Number of top stocks to return (increased for larger universes)")
+    top_n: int = Field(10, ge=1, le=200, description="Number of top stocks to return (increased for larger universes)")
     custom_tickers: Optional[str] = Field(None, description="Comma-separated ticker symbols (e.g., 'TCS.NS,INFY.NS,HCLTECH.NS'). If provided, overrides default universe.")
     
     # Dynamic Universe Selection
