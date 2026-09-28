@@ -43,6 +43,30 @@
     </div>
 </nav>
 
+<!-- Data failures for the active page, including runs with no results. -->
+<section x-show="currentFailures.length > 0" x-cloak class="max-w-7xl mx-auto px-4 sm:px-6 mt-6" aria-label="Stock data failures">
+    <details open class="card" style="border-color:var(--accent-red)">
+        <summary class="font-semibold cursor-pointer" style="color:var(--accent-red)"
+                 x-text="currentFailures.length + ' stock(s) with unavailable data or failed analysis'"></summary>
+        <p class="text-sm mt-3 mb-3" style="color:var(--text-secondary)">
+            Review the reason for each stock below. Retry its analysis, look up the symbol on Yahoo Finance, or edit the ticker to use a verified exchange symbol (NSE: .NS, BSE: .BO). Stocks with partial data may still appear in results.
+        </p>
+        <div class="space-y-3" style="max-height:320px;overflow-y:auto">
+            <template x-for="failure in currentFailures" :key="failure.ticker">
+                <div class="rounded p-3" style="background:var(--bg-secondary)">
+                    <strong class="font-mono text-sm" x-text="failure.ticker"></strong>
+                    <p class="text-sm mt-1 break-words" style="color:var(--text-secondary)" x-text="failure.reason"></p>
+                    <div class="flex flex-wrap gap-4 text-xs mt-2" style="color:var(--accent-blue)">
+                        <button type="button" class="hover:underline" :disabled="loading" @click="analyzeFromResults(failure.ticker)">Retry analysis</button>
+                        <button type="button" class="hover:underline" :disabled="loading" @click="editFailedTicker(failure.ticker)">Edit ticker</button>
+                        <a class="hover:underline" :href="'https://finance.yahoo.com/quote/' + encodeURIComponent(failure.ticker) + '/'" target="_blank" rel="noopener noreferrer">Look up on Yahoo Finance ↗</a>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </details>
+</section>
+
 <!-- ─── HERO / SEARCH (Analysis Mode) ────────────────────── -->
 <div x-show="mode === 'analysis'" class="max-w-7xl mx-auto px-4 sm:px-6 pt-8 pb-4">
     <div x-show="!report && !loading" class="text-center py-20">
@@ -80,9 +104,18 @@
                 <span x-text="includeLLMAnalysis ? '✓ AI Analysis On' : 'AI Analysis Off'"></span>
             </button>
             <span x-show="includeLLMAnalysis" style="color:var(--text-secondary)" class="text-xs">
-                AI will analyze and provide verdict, entry strategy, and risk flags
+                AI assesses your swing entry, chart-based stop, targets, and re-entry plan
             </span>
         </div>
+    </div>
+    <div class="flex flex-wrap justify-center gap-4 mb-6">
+        <label class="text-xs" style="color:var(--text-secondary)">Trading capital (quote currency, optional)
+            <input type="number" min="0.01" step="any" x-model="tradingCapital" class="input-field block mt-1" placeholder="Enter your capital" :disabled="loading" />
+        </label>
+        <label class="text-xs" style="color:var(--text-secondary)">Account risk per trade % (optional)
+            <input type="number" min="0.01" max="100" step="0.01" x-model="analysisRiskPct" class="input-field block mt-1" placeholder="0.5 / 0.75 / 1" :disabled="loading" />
+        </label>
+        <p class="w-full text-center text-xs" style="color:var(--text-secondary)">Supply capital and risk for personal sizing. Otherwise the report shows clearly labelled illustrations. The technical stop stays tied to chart structure.</p>
     </div>
     <div class="flex justify-center mb-6">
         <div class="flex flex-wrap gap-2 text-xs" style="color:var(--text-secondary)">
@@ -133,20 +166,20 @@
             <div class="mb-4">
                 <p style="color:var(--text-secondary)" class="text-xs mb-2" x-text="queryMultiMode ? 'Example Queries (click to add/remove):' : 'Example Queries (click to use):'"></p>
                 <div class="flex flex-wrap gap-2">
-                    <button type="button" @click="toggleExampleQuery('Market Capitalization > 500 AND Current price > 1.05 * DMA 200 AND RSI > 50 AND RSI < 70 AND Earnings growth > 10 AND Price to earning < 30')" 
+                    <button type="button" @click="toggleExampleQuery('Market Capitalization > 500 AND Current price > DMA 50 AND DMA 50 > DMA 200 AND Current price > DMA 200 AND Current price < 1.12 * DMA 50 AND RSI > 52 AND RSI < 68 AND YOY Quarterly profit growth > 10 AND YOY Quarterly sales growth > 8 AND Return on capital employed > 15 AND Debt to equity < 1')"
                             class="text-xs px-2 py-1 rounded transition-all"
-                            :style="isQueryActive('Market Capitalization > 500 AND Current price > 1.05 * DMA 200 AND RSI > 50 AND RSI < 70 AND Earnings growth > 10 AND Price to earning < 30') ? 'background:var(--accent-green);color:white;border:1px solid var(--accent-green)' : 'background:var(--bg-secondary);color:var(--accent-green);border:1px solid var(--border)'">
+                            :style="isQueryActive('Market Capitalization > 500 AND Current price > DMA 50 AND DMA 50 > DMA 200 AND Current price > DMA 200 AND Current price < 1.12 * DMA 50 AND RSI > 52 AND RSI < 68 AND YOY Quarterly profit growth > 10 AND YOY Quarterly sales growth > 8 AND Return on capital employed > 15 AND Debt to equity < 1') ? 'background:var(--accent-green);color:white;border:1px solid var(--accent-green)' : 'background:var(--bg-secondary);color:var(--accent-green);border:1px solid var(--border)'">
                         Growth Momentum
                     </button>
-                    <button type="button" @click="toggleExampleQuery('100 * ((52 week high - Current price) / 52 week high) < 5 AND 100 * ((52 week high - Current price) / 52 week high) > 0 AND 100 * (Current price / 52 week low - 1) > 100 AND Current price > 120 AND Volume > 100000')" 
+                    <button type="button" @click="toggleExampleQuery('Market Capitalization > 500 AND Return over 3months > 10 AND Return over 3months < 45 AND Volume 1week average > 50000 AND Volume 1week average > Volume 1month average AND Return on capital employed > 15 AND Debt to equity < 1 AND Current price > DMA 50 AND DMA 50 > DMA 200 AND Current price < 1.10 * DMA 50 AND RSI > 50 AND RSI < 70')"
+                            class="text-xs px-2 py-1 rounded transition-all"
+                            :style="isQueryActive('Market Capitalization > 500 AND Return over 3months > 10 AND Return over 3months < 45 AND Volume 1week average > 50000 AND Volume 1week average > Volume 1month average AND Return on capital employed > 15 AND Debt to equity < 1 AND Current price > DMA 50 AND DMA 50 > DMA 200 AND Current price < 1.10 * DMA 50 AND RSI > 50 AND RSI < 70') ? 'background:var(--accent-green);color:white;border:1px solid var(--accent-green)' : 'background:var(--bg-secondary);color:var(--accent-green);border:1px solid var(--border)'">
+                        Quality + Momentum
+                    </button>
+                    <button type="button" @click="toggleExampleQuery('100 * ((52 week high - Current price) / 52 week high) < 5 AND 100 * ((52 week high - Current price) / 52 week high) > 0 AND 100 * (Current price / 52 week low - 1) > 100 AND Current price > 120 AND Volume > 100000')"
                             class="text-xs px-2 py-1 rounded transition-all"
                             :style="isQueryActive('100 * ((52 week high - Current price) / 52 week high) < 5 AND 100 * ((52 week high - Current price) / 52 week high) > 0 AND 100 * (Current price / 52 week low - 1) > 100 AND Current price > 120 AND Volume > 100000') ? 'background:var(--accent-green);color:white;border:1px solid var(--accent-green)' : 'background:var(--bg-secondary);color:var(--accent-green);border:1px solid var(--border)'">
                         Near 52-Week High
-                    </button>
-                    <button type="button" @click="toggleExampleQuery('Market Capitalization > 500 AND Return over 3 months > 10 AND Volume 1 week average > 50000 AND ROCE > 15 AND Debt to equity < 1 AND Current price > DMA 50')" 
-                            class="text-xs px-2 py-1 rounded transition-all"
-                            :style="isQueryActive('Market Capitalization > 500 AND Return over 3 months > 10 AND Volume 1 week average > 50000 AND ROCE > 15 AND Debt to equity < 1 AND Current price > DMA 50') ? 'background:var(--accent-green);color:white;border:1px solid var(--accent-green)' : 'background:var(--bg-secondary);color:var(--accent-green);border:1px solid var(--border)'">
-                        Quality + Momentum
                     </button>
                     <button type="button" @click="toggleExampleQuery('RSI < 35 AND Current price < DMA 200 AND Market Capitalization > 1000')" 
                             class="text-xs px-2 py-1 rounded transition-all"
@@ -173,16 +206,16 @@
                     <input type="number" x-model.number="queryTopN" class="input-field w-full" min="10" max="200" :disabled="queryLoading" />
                 </div>
                 <div>
-                    <label style="color:var(--text-secondary)" class="text-xs block mb-1">LLM Analysis</label>
+                    <label for="query-ai-count" style="color:var(--text-secondary)" class="text-xs block mb-1">AI stocks (top N)</label>
                     <div class="flex items-center gap-2 h-10">
                         <button type="button" @click="includeLLM = !includeLLM" 
                                 class="px-3 py-1.5 rounded text-xs font-semibold transition-all flex items-center gap-1"
                                 :style="includeLLM ? 'background:var(--accent-purple);color:white' : 'background:var(--bg-secondary);color:var(--text-secondary);border:1px solid var(--border)'">
                             <span x-text="includeLLM ? '✓ AI On' : 'AI Off'"></span>
                         </button>
-                        <input x-show="includeLLM" type="number" x-model.number="llmMaxStocks" 
+                        <input id="query-ai-count" x-show="includeLLM" type="number" x-model.number="llmMaxStocks"
                                class="input-field w-16 text-xs" min="1" max="30" 
-                               title="Max stocks for LLM analysis" :disabled="queryLoading" />
+                               title="Number of source-list stocks to analyze with AI" :disabled="queryLoading" />
                     </div>
                 </div>
                 <div class="flex items-end">
@@ -193,6 +226,10 @@
                 </div>
             </div>
             
+            <p x-show="includeLLM" class="text-xs mb-4" style="color:var(--text-secondary)">
+                AI analyzes up to <strong x-text="llmMaxStocks"></strong> stocks with available data in source-list order, including stocks that do not match the filter. Max Results controls the matched-stock list.
+            </p>
+
             <!-- Screener.in URL Input -->
             <div class="mb-4 p-3 rounded-lg" style="background:var(--bg-secondary);border:1px dashed var(--border)">
                 <div class="flex items-center justify-between mb-2">
@@ -252,7 +289,8 @@ https://www.screener.in/screens/3625029/strength-with-volume/"
                         </div>
                         <div>
                             <p class="font-semibold mb-1" style="color:var(--accent-green)">Technical Indicators</p>
-                            <p style="color:var(--text-secondary)">RSI, Volume, Volume 1 week average, Return over 3 months</p>
+                            <p style="color:var(--text-secondary)">RSI, Volume, Volume 1 week average, Volume 1 month average (21 trading sessions), Return over 3 months</p>
+                            <p class="mt-1" style="color:var(--text-secondary)">Example: Volume &gt; 1.5 * Volume 1 month average</p>
                         </div>
                         <div>
                             <p class="font-semibold mb-1" style="color:var(--accent-purple)">Fundamentals</p>
@@ -477,6 +515,7 @@ https://www.screener.in/screens/3625029/strength-with-volume/"
     <!-- LLM Enriched Stock Cards -->
     <div x-show="queryReport?.llm_enriched?.length > 0" class="mb-6">
         <div class="section-title mb-4">AI-Analyzed Stocks (<span x-text="queryReport?.llm_enriched?.length || 0"></span>)</div>
+        <p class="text-xs mb-4" style="color:var(--text-secondary)">Selected from the source list in order, independently of filter matches. Stocks with unavailable data are skipped.</p>
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <template x-for="stock in queryReport?.llm_enriched || []" :key="stock.stock">
                 <div class="card fade-in-up" 
@@ -622,31 +661,6 @@ https://www.screener.in/screens/3625029/strength-with-volume/"
         </form>
     </div>
 
-    <!-- Failed Tickers Section -->
-    <div x-show="failedTickers.length > 0 && showFailedTickers" class="max-w-4xl mx-auto mb-6">
-        <div class="card" style="border-color:var(--accent-red);background:rgba(255,107,107,0.05)">
-            <button @click="showFailedTickers=!showFailedTickers" class="w-full flex items-center justify-between p-4 cursor-pointer">
-                <div class="flex items-center gap-2">
-                    <span class="text-xl">⚠️</span>
-                    <div class="text-left">
-                        <p class="font-semibold" style="color:var(--accent-red)" x-text="failedTickers.length + ' ticker(s) could not be found'"></p>
-                        <p style="color:var(--text-secondary)" class="text-xs">Click to expand and see details</p>
-                    </div>
-                </div>
-                <span class="text-lg" x-text="showFailedTickers ? '▼' : '▶'"></span>
-            </button>
-            <div x-show="showFailedTickers" class="px-4 pb-4 pt-0">
-                <div class="bg-opacity-50 rounded p-3 text-sm" style="background:var(--bg-secondary)">
-                    <p style="color:var(--text-secondary)" class="mb-2">These tickers returned 404 errors and were skipped:</p>
-                    <div class="flex flex-wrap gap-2">
-                        <template x-for="ticker in failedTickers">
-                            <span class="px-2 py-1 rounded text-xs font-mono" style="background:var(--accent-red);color:#fff" x-text="ticker"></span>
-                        </template>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
 </div>
 
 <!-- ─── SCREENER LOADING ─────────────────────────────────── -->
@@ -1138,94 +1152,142 @@ https://www.screener.in/screens/3625029/strength-with-volume/"
         </div>
     </div>
 
-    <!-- AI Analysis Card (only shown when LLM analysis is present) -->
-    <div x-show="report?.llm_analysis" class="card mb-6 fade-in-up" style="border-color:var(--accent-purple)">
-        <div class="flex items-center justify-between mb-4">
-            <div class="section-title flex items-center gap-2">
-                <span style="color:var(--accent-purple)">🤖</span> AI Analysis
-            </div>
-            <div class="flex items-center gap-2">
-                <span class="px-3 py-1 rounded-full text-sm font-bold"
-                      :style="report?.llm_analysis?.verdict === 'BUY' ? 'background:var(--accent-green);color:#fff' :
-                              report?.llm_analysis?.verdict === 'WATCHLIST' ? 'background:var(--accent-blue);color:#fff' :
-                              report?.llm_analysis?.verdict === 'HOLD' ? 'background:var(--accent-yellow);color:#000' :
-                              'background:var(--accent-red);color:#fff'"
-                      x-text="report?.llm_analysis?.verdict"></span>
-                <span style="color:var(--text-secondary)" class="text-xs">
-                    Confidence: <strong x-text="((report?.llm_analysis?.confidence || 0) * 100).toFixed(0) + '%'"></strong>
-                </span>
-            </div>
+    <!-- Swing trading evidence and the user's 14-section framework -->
+    <div x-show="report?.swing_analysis_error" class="card mb-6" role="status" style="border-color:var(--accent-yellow)">
+        <p x-text="report?.swing_analysis_error"></p>
+    </div>
+    <div x-show="report?.swing_data?.market_data" class="card mb-6">
+        <div class="section-title">Current market evidence · Swing horizon: days to weeks</div>
+        <p class="text-xs mb-2" style="color:var(--text-secondary)">
+            Latest session: <strong x-text="report?.swing_data?.as_of?.latest_session"></strong> ·
+            Quote timestamp: <strong x-text="report?.swing_data?.as_of?.quote_time || 'Unavailable'"></strong> ·
+            Indicators generated: <strong x-text="report?.swing_data?.as_of?.indicators_generated_at"></strong>
+        </p>
+        <p class="text-xs mb-4" style="color:var(--text-secondary)" x-text="report?.swing_data?.as_of?.note"></p>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <template x-for="row in swingMarketRows" :key="row.label">
+                <div class="p-3 rounded" style="background:var(--bg-secondary)">
+                    <div class="text-xs" style="color:var(--text-secondary)" x-text="row.label"></div>
+                    <div class="font-mono font-semibold text-sm mt-1" x-text="row.value"></div>
+                </div>
+            </template>
         </div>
-        
-        <!-- Stage -->
-        <div class="mb-4">
-            <span style="color:var(--text-secondary)" class="text-xs">Trend Stage:</span>
-            <span class="ml-2 px-2 py-0.5 rounded text-xs font-semibold" style="background:var(--bg-secondary);color:var(--text-primary)"
-                  x-text="report?.llm_analysis?.stage?.replace(/_/g, ' ')"></span>
+        <ul class="text-xs mt-4 space-y-1" style="color:var(--accent-yellow)">
+            <template x-for="gap in report?.swing_data?.data_gaps || []"><li x-text="gap"></li></template>
+        </ul>
+        <p x-show="report?.swing_analysis_status === 'not_requested'" class="text-sm mt-4" style="color:var(--text-secondary)">Enable AI Analysis and run again for the complete swing-entry assessment and decision table.</p>
+    </div>
+
+    <div x-show="report?.swing_analysis" class="card mb-6" style="border-color:var(--accent-purple)">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <div class="section-title">Swing decision table</div>
+            <strong class="badge" :class="report?.swing_analysis?.entry_now ? 'badge-green' : 'badge-yellow'" x-text="report?.swing_analysis?.decision"></strong>
         </div>
-        
-        <!-- Thesis -->
-        <div class="mb-4">
-            <div style="color:var(--text-secondary)" class="text-xs mb-2">Investment Thesis:</div>
-            <ul class="space-y-1">
-                <template x-for="point in report?.llm_analysis?.thesis || []" :key="point">
-                    <li class="flex items-start gap-2 text-sm">
-                        <span style="color:var(--accent-green)">•</span>
-                        <span x-text="point"></span>
-                    </li>
-                </template>
-            </ul>
+        <p class="text-xs mb-3" style="color:var(--text-secondary)">Scores are qualitative setup assessments, not probabilities of profit.</p>
+        <div class="overflow-x-auto"><table class="w-full text-sm">
+            <thead><tr><th class="text-left p-2">Decision field</th><th class="text-left p-2">Assessment</th></tr></thead>
+            <tbody><template x-for="row in swingSummaryRows" :key="row.label"><tr style="border-top:1px solid var(--border)">
+                <th class="text-left p-2 font-medium" style="color:var(--text-secondary)" x-text="row.label"></th><td class="p-2" x-text="row.value"></td>
+            </tr></template></tbody>
+        </table></div>
+        <ul class="text-sm mt-4 space-y-2" style="color:var(--accent-yellow)">
+            <template x-for="note in report?.swing_analysis?.validation_notes || []"><li x-text="note"></li></template>
+        </ul>
+    </div>
+
+    <div x-show="report?.swing_analysis" class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <template x-for="setup in report?.swing_analysis?.setups || []" :key="setup.name"><div class="card">
+            <div class="section-title" x-text="fieldLabel(setup.name)"></div>
+            <p class="text-sm mb-3"><strong x-text="setup.status"></strong> · Quality <span x-text="swingValue(setup.quality_score)"></span>/10</p>
+            <ul class="text-sm space-y-1 mb-3"><template x-for="point in setup.evidence"><li x-text="point"></li></template></ul>
+            <table class="w-full text-xs"><tbody><template x-for="[key, value] in Object.entries(setup.levels || {})" :key="key"><tr>
+                <td class="py-1" style="color:var(--text-secondary)" x-text="fieldLabel(key)"></td><td class="text-right" x-text="swingValue(value)"></td>
+            </tr></template></tbody></table>
+        </div></template>
+    </div>
+
+    <div x-show="report?.swing_analysis" class="card mb-6">
+        <div class="section-title">Technical stop and risk/reward</div>
+        <p class="text-sm mb-3" x-text="report?.swing_analysis?.stop_reason"></p>
+        <p class="text-sm mb-4">Structure anchor: <strong x-text="swingPrice(report?.swing_analysis?.stop_anchor)"></strong> · Technical stop: <strong x-text="swingPrice(report?.swing_analysis?.technical_stop)"></strong> · Risk/share: <strong x-text="swingPrice(report?.swing_analysis?.risk_per_share)"></strong></p>
+        <div class="overflow-x-auto"><table class="w-full text-sm">
+            <thead><tr><th class="p-2 text-left">Target</th><th class="p-2 text-right">Price</th><th class="p-2 text-right">Reward %</th><th class="p-2 text-right">Reward/risk</th><th class="p-2 text-left">Chart basis</th></tr></thead>
+            <tbody><template x-for="target in report?.swing_analysis?.targets || []" :key="target.label"><tr style="border-top:1px solid var(--border)">
+                <td class="p-2" x-text="target.label"></td><td class="p-2 text-right" x-text="swingPrice(target.price)"></td><td class="p-2 text-right" x-text="swingValue(target.reward_pct, '%')"></td><td class="p-2 text-right" x-text="swingValue(target.reward_risk, 'R')"></td><td class="p-2" x-text="target.basis"></td>
+            </tr></template></tbody>
+        </table></div>
+    </div>
+
+    <div x-show="report?.swing_analysis" class="card mb-6">
+        <div class="section-title">Position sizing and trade management</div>
+        <p class="text-sm mb-2">Quantity = maximum account loss ÷ risk per share, rounded down and capped by available capital.</p>
+        <p class="text-xs mb-3" style="color:var(--text-secondary)">Illustrations use 100,000 in the quote currency if capital was not supplied, and 0.5%, 0.75%, 1% risk if risk was not supplied. Estimated loss excludes fees, slippage and gaps.</p>
+        <p x-show="!report?.swing_analysis?.position_sizing?.length" class="text-sm mb-3">Sizing unavailable until a supported entry and technical stop exist.</p>
+        <div class="overflow-x-auto"><table class="w-full text-xs">
+            <thead><tr><th class="p-2 text-left">Scenario</th><th class="p-2 text-right">Capital</th><th class="p-2 text-right">Risk %</th><th class="p-2 text-right">Risk budget</th><th class="p-2 text-right">Shares</th><th class="p-2 text-right">Position value</th><th class="p-2 text-right">Loss at stop</th></tr></thead>
+            <tbody><template x-for="(size, i) in report?.swing_analysis?.position_sizing || []" :key="i"><tr style="border-top:1px solid var(--border)">
+                <td class="p-2" x-text="size.illustrative ? 'Illustration' : 'Your inputs'"></td><td class="p-2 text-right" x-text="swingPrice(size.capital)"></td><td class="p-2 text-right" x-text="swingValue(size.risk_pct, '%')"></td><td class="p-2 text-right" x-text="swingPrice(size.risk_budget)"></td><td class="p-2 text-right" x-text="size.quantity"></td><td class="p-2 text-right" x-text="swingPrice(size.position_value)"></td><td class="p-2 text-right" x-text="swingPrice(size.loss_at_stop)"></td>
+            </tr></template></tbody>
+        </table></div>
+        <p class="text-sm mt-4"><strong>Partial profit: </strong><span x-text="report?.swing_analysis?.partial_profit_plan"></span></p>
+        <p class="text-sm mt-2"><strong>Trail: </strong><span x-text="report?.swing_analysis?.trailing_method"></span></p>
+        <p class="text-sm mt-2"><strong>Full exit: </strong><span x-text="report?.swing_analysis?.full_exit_trigger"></span></p>
+    </div>
+
+    <div x-show="report?.swing_data?.stage_checks" class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div class="card"><div class="section-title">Stage-2 evidence</div><table class="w-full text-sm"><tbody>
+            <template x-for="[key, value] in Object.entries(report?.swing_data?.stage_checks || {})" :key="key"><tr><td class="py-1" x-text="fieldLabel(key)"></td><td class="text-right" x-text="swingValue(value)"></td></tr></template>
+        </tbody></table><p class="text-xs mt-3" style="color:var(--text-secondary)">Rising/flat averages use a 20-session comparison; near-high means within 15%. Benchmark and volume evidence are considered separately.</p></div>
+        <div class="card"><div class="section-title">Extension and volume evidence</div><table class="w-full text-xs"><tbody>
+            <template x-for="[key, value] in Object.entries({...report?.swing_data?.extension_signals, ...report?.swing_data?.volume_analysis})" :key="key"><tr><td class="py-1 pr-3" x-text="fieldLabel(key)"></td><td class="text-right" x-text="swingValue(value)"></td></tr></template>
+        </tbody></table></div>
+    </div>
+
+    <div x-show="report?.swing_data?.structure_levels" class="card mb-6">
+        <div class="section-title">Observed support, resistance and pivots</div>
+        <p class="text-sm mb-3">Recent swing low: <strong x-text="swingPrice(report?.swing_data?.recent_swing_low?.price)"></strong> · Recent swing high: <strong x-text="swingPrice(report?.swing_data?.recent_swing_high?.price)"></strong></p>
+        <div class="overflow-x-auto" style="max-height:300px"><table class="w-full text-xs">
+            <thead><tr><th class="text-left p-2">Type</th><th class="text-right p-2">Level</th><th class="text-left p-2">Date</th><th class="text-left p-2">Why it matters</th></tr></thead>
+            <tbody><template x-for="(level, i) in report?.swing_data?.structure_levels || []" :key="i"><tr style="border-top:1px solid var(--border)"><td class="p-2" x-text="level.kind"></td><td class="p-2 text-right" x-text="swingPrice(level.price)"></td><td class="p-2" x-text="level.date || 'Current structure'"></td><td class="p-2" x-text="level.basis"></td></tr></template></tbody>
+        </table></div>
+    </div>
+
+    <div x-show="report?.swing_data?.relative_strength" class="card mb-6">
+        <div class="section-title">Relative strength · aligned trading dates</div>
+        <p class="text-xs mb-3" style="color:var(--text-secondary)">Price returns over 21 and 63 shared sessions; excess return is measured in percentage points.</p>
+        <div class="overflow-x-auto"><table class="w-full text-xs">
+            <thead><tr><th class="p-2 text-left">Benchmark / date</th><th class="p-2">Stock 1M</th><th class="p-2">Index 1M</th><th class="p-2">Excess 1M</th><th class="p-2">Stock 3M</th><th class="p-2">Index 3M</th><th class="p-2">Excess 3M</th></tr></thead>
+            <tbody><template x-for="item in report?.swing_data?.relative_strength || []" :key="item.ticker"><tr style="border-top:1px solid var(--border)">
+                <td class="p-2" x-text="item.name + ' / ' + (item.as_of || 'Unavailable')"></td><td class="p-2" x-text="swingValue(item.stock_1m_pct, '%')"></td><td class="p-2" x-text="swingValue(item.benchmark_1m_pct, '%')"></td><td class="p-2" x-text="swingValue(item.excess_1m_pp, ' pp')"></td><td class="p-2" x-text="swingValue(item.stock_3m_pct, '%')"></td><td class="p-2" x-text="swingValue(item.benchmark_3m_pct, '%')"></td><td class="p-2" x-text="swingValue(item.excess_3m_pp, ' pp')"></td>
+            </tr></template></tbody>
+        </table></div>
+    </div>
+
+    <div x-show="report?.swing_data?.fundamentals" class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div class="card"><div class="section-title">Fundamental sanity check</div><table class="w-full text-xs"><tbody>
+            <template x-for="[key, value] in Object.entries(report?.swing_data?.fundamentals || {})" :key="key"><tr><td class="py-1 pr-3" x-text="fieldLabel(key)"></td><td class="text-right" x-text="swingValue(value)"></td></tr></template>
+        </tbody></table></div>
+        <div class="card"><div class="section-title">Corporate events and recent news</div>
+            <template x-for="(event, i) in report?.swing_data?.events?.upcoming || []" :key="i"><p class="text-sm mb-2" x-text="event.date + ' · ' + event.event + ' (' + event.source + ')'"></p></template>
+            <ul class="text-xs mb-4 space-y-2" style="color:var(--accent-yellow)"><template x-for="gap in report?.swing_data?.events?.coverage_notes || []"><li x-text="gap"></li></template></ul>
+            <template x-for="(news, i) in report?.swing_data?.events?.news || []" :key="i"><div class="text-sm mb-3">
+                <a :href="safeExternalUrl(news.url)" target="_blank" rel="noopener noreferrer" class="hover:underline" style="color:var(--accent-blue)" x-text="news.title"></a><div class="text-xs" style="color:var(--text-secondary)" x-text="news.source + ' · ' + (news.published_at || 'Date unavailable')"></div>
+            </div></template>
         </div>
-        
-        <!-- Strength Signals Grid -->
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4" style="border-top:1px solid var(--border);padding-top:1rem">
-            <div>
-                <span style="color:var(--text-secondary)" class="text-xs block">Trend Alignment</span>
-                <span class="text-sm font-semibold" x-text="report?.llm_analysis?.strength_signals?.trend_alignment || '—'"></span>
-            </div>
-            <div>
-                <span style="color:var(--text-secondary)" class="text-xs block">Momentum Quality</span>
-                <span class="text-sm font-semibold" x-text="report?.llm_analysis?.strength_signals?.momentum_quality || '—'"></span>
-            </div>
-            <div>
-                <span style="color:var(--text-secondary)" class="text-xs block">Volume Support</span>
-                <span class="text-sm font-semibold" x-text="report?.llm_analysis?.strength_signals?.volume_support || '—'"></span>
-            </div>
-            <div>
-                <span style="color:var(--text-secondary)" class="text-xs block">Price Structure</span>
-                <span class="text-sm font-semibold" x-text="report?.llm_analysis?.strength_signals?.price_structure || '—'"></span>
-            </div>
+    </div>
+
+    <div x-show="report?.swing_analysis" class="mb-6">
+        <div class="section-title">Complete swing assessment</div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <template x-for="section in swingSections" :key="section.key"><details open class="card">
+                <summary class="font-semibold cursor-pointer mb-3" x-text="section.title"></summary>
+                <ul class="text-sm space-y-2"><template x-for="(point, i) in section.points" :key="i"><li x-text="point"></li></template></ul>
+            </details></template>
         </div>
-        
-        <!-- Entry Strategy -->
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4" style="border-top:1px solid var(--border);padding-top:1rem">
-            <div>
-                <span style="color:var(--text-secondary)" class="text-xs block">Entry Trigger</span>
-                <span class="text-sm font-semibold" style="color:var(--accent-blue)" x-text="report?.llm_analysis?.entry_strategy?.trigger || '—'"></span>
-            </div>
-            <div>
-                <span style="color:var(--text-secondary)" class="text-xs block">Entry Zone</span>
-                <span class="text-sm font-semibold" x-text="report?.llm_analysis?.entry_strategy?.zone || '—'"></span>
-            </div>
-            <div>
-                <span style="color:var(--text-secondary)" class="text-xs block">Position Size</span>
-                <span class="text-sm font-semibold" x-text="report?.llm_analysis?.entry_strategy?.position_size || '—'"></span>
-            </div>
-            <div>
-                <span style="color:var(--text-secondary)" class="text-xs block">Time Horizon</span>
-                <span class="text-sm font-semibold" x-text="report?.llm_analysis?.entry_strategy?.time_horizon || '—'"></span>
-            </div>
-        </div>
-        
-        <!-- Risk Flags -->
-        <div x-show="report?.llm_analysis?.risk_flags?.length > 0" style="border-top:1px solid var(--border);padding-top:1rem">
-            <div style="color:var(--accent-red)" class="text-xs mb-2 font-semibold">⚠️ Risk Flags:</div>
-            <div class="flex flex-wrap gap-2">
-                <template x-for="flag in report?.llm_analysis?.risk_flags || []" :key="flag">
-                    <span class="px-2 py-1 rounded text-xs" style="background:rgba(239,68,68,0.15);color:var(--accent-red)" x-text="flag"></span>
-                </template>
-            </div>
-        </div>
+    </div>
+    <div x-show="report?.swing_analysis" class="card mb-6">
+        <div class="section-title">Before entering</div>
+        <template x-for="item in swingAnswers" :key="item.question"><div class="mb-4"><h3 class="font-semibold text-sm" x-text="item.question"></h3><p class="text-sm mt-1" style="color:var(--text-secondary)" x-text="item.answer"></p></div></template>
     </div>
 
     <!-- Chart -->
@@ -1469,77 +1531,6 @@ https://www.screener.in/screens/3625029/strength-with-volume/"
                     <span style="color:var(--text-secondary)" class="text-xs">Trend Maturity</span>
                     <span class="font-semibold text-xs" style="color:var(--accent-blue)" x-text="report?.derived_signals?.trend_maturity?.replace(/_/g, ' ')"></span>
                 </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- ─── TRADE LEVELS (highlighted) ──────────────────── -->
-    <div class="card mb-6 fade-in-up" style="animation-delay:0.55s;border-color:var(--accent-blue);box-shadow:0 0 20px rgba(88,166,255,0.1)">
-        <div class="flex items-center justify-between mb-4">
-            <div class="section-title mb-0" style="color:var(--accent-blue)">Trade Levels</div>
-            <span class="text-xs px-3 py-1 rounded-full font-semibold" style="background:var(--accent-blue);color:#fff" x-text="report?.trade_levels?.strategy_horizon + ' strategy'"></span>
-        </div>
-
-        <!-- Bias + Entry + R:R row -->
-        <div class="grid grid-cols-3 gap-4 mb-5">
-            <div class="text-center py-3 rounded-lg" style="background:var(--bg-secondary)">
-                <span style="color:var(--text-secondary)" class="text-xs block mb-1">Bias</span>
-                <div class="text-xl font-bold"
-                     :style="report?.trade_levels?.position_bias === 'Long' ? 'color:var(--accent-green)' : 'color:var(--accent-red)'"
-                     x-text="report?.trade_levels?.position_bias"></div>
-            </div>
-            <div class="text-center py-3 rounded-lg" style="background:var(--bg-secondary)">
-                <span style="color:var(--text-secondary)" class="text-xs block mb-1">Ideal Entry</span>
-                <div class="text-xl font-bold font-mono" style="color:var(--accent-blue)" x-text="cs() + report?.trade_levels?.ideal_entry?.toFixed(2)"></div>
-            </div>
-            <div class="text-center py-3 rounded-lg" style="background:var(--bg-secondary)">
-                <span style="color:var(--text-secondary)" class="text-xs block mb-1">Risk : Reward</span>
-                <div class="text-xl font-extrabold" style="color:var(--accent-yellow)" x-text="'1 : ' + report?.trade_levels?.risk_reward_ratio"></div>
-                <span style="color:var(--text-secondary)" class="text-[10px]">(SL1 → T2)</span>
-            </div>
-        </div>
-
-        <!-- Targets + Stop-losses side by side -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <!-- Targets -->
-            <div class="rounded-lg p-4" style="background:var(--bg-secondary);border:1px solid rgba(63,185,80,0.2)">
-                <div class="text-xs font-bold mb-3" style="color:var(--accent-green)">▲ TARGETS</div>
-                <template x-for="t in report?.trade_levels?.targets" :key="t.label">
-                    <div class="flex items-center justify-between py-2" style="border-bottom:1px solid var(--border)">
-                        <div class="flex items-center gap-2">
-                            <span class="text-xs font-bold px-2 py-0.5 rounded"
-                                  style="background:rgba(63,185,80,0.15);color:var(--accent-green)"
-                                  x-text="t.label"></span>
-                            <span class="font-mono font-bold text-sm" style="color:var(--accent-green)" x-text="cs() + t.price?.toFixed(2)"></span>
-                        </div>
-                        <div class="flex items-center gap-3">
-                            <span class="text-[10px] font-mono px-1.5 py-0.5 rounded" style="background:var(--bg-primary);color:var(--text-secondary)"
-                                  x-text="t.expected_move_multiple_atr?.toFixed(2) + '× ATR'"></span>
-                            <div class="flex items-center gap-1" :title="'Confidence: ' + t.confidence_percent + '%'">
-                                <div class="w-14 h-1.5 rounded-full overflow-hidden" style="background:var(--bg-primary)">
-                                    <div class="h-full rounded-full" :style="'width:' + (t.confidence_percent || 0) + '%;background:' + (t.confidence_percent >= 60 ? 'var(--accent-green)' : t.confidence_percent >= 30 ? 'var(--accent-yellow)' : 'var(--accent-red)')"></div>
-                                </div>
-                                <span class="text-[10px] font-bold font-mono w-8 text-right" :style="(t.confidence_percent >= 60 ? 'color:var(--accent-green)' : t.confidence_percent >= 30 ? 'color:var(--accent-yellow)' : 'color:var(--accent-red)')"
-                                      x-text="t.confidence_percent + '%'"></span>
-                            </div>
-                        </div>
-                    </div>
-                </template>
-            </div>
-            <!-- Stop-losses -->
-            <div class="rounded-lg p-4" style="background:var(--bg-secondary);border:1px solid rgba(248,81,73,0.2)">
-                <div class="text-xs font-bold mb-3" style="color:var(--accent-red)">▼ STOP-LOSSES</div>
-                <template x-for="sl in report?.trade_levels?.stop_losses" :key="sl.label">
-                    <div class="flex items-center justify-between py-2" style="border-bottom:1px solid var(--border)">
-                        <div class="flex items-center gap-2">
-                            <span class="text-xs font-bold px-2 py-0.5 rounded"
-                                  style="background:rgba(248,81,73,0.15);color:var(--accent-red)"
-                                  x-text="sl.label"></span>
-                            <span class="font-mono font-bold text-sm" style="color:var(--accent-red)" x-text="cs() + sl.price?.toFixed(2)"></span>
-                        </div>
-                        <span style="color:var(--text-secondary)" class="text-xs" x-text="sl.basis"></span>
-                    </div>
-                </template>
             </div>
         </div>
     </div>

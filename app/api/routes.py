@@ -14,8 +14,11 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
 from app.engine.analyzer import run_analysis
+from app.engine.swing_context import build_swing_context
+from app.services.swing_analysis import analyze_swing
 from app.engine.data_fetcher import fetch_quote
 from app.engine.screener import run_screener
+from app.engine.stock_universe import get_stock_universe
 from app.engine.query_engine import (
     run_query,
     run_multiple_queries,
@@ -57,28 +60,47 @@ router = APIRouter(prefix="/api", tags=["analysis"])
 async def analyze(req: AnalysisRequest):
     """Run full technical analysis for a given ticker."""
     try:
-        report = run_analysis(req.ticker, req.position)
-        
-        # Add LLM analysis if requested
+        report = (await asyncio.to_thread(run_analysis, req.ticker, req.position)).model_copy(deep=True)
+        # Request-specific sizing and AI output must never mutate the shared technical cache.
+        try:
+            report.swing_data = await asyncio.to_thread(build_swing_context, report)
+            market = report.swing_data["market_data"]
+            report.price_snapshot.current_price = market["current_price"]
+            for field, key in [("open", "latest_session_open"), ("day_high", "latest_session_high"), ("day_low", "latest_session_low")]:
+                if market.get(key) is not None:
+                    setattr(report.price_snapshot, field, market[key])
+            if market.get("current_volume") is not None:
+                report.price_snapshot.volume = int(market["current_volume"])
+            if report.price_snapshot.prev_close:
+                report.price_snapshot.change = round(market["current_price"] - report.price_snapshot.prev_close, 2)
+                report.price_snapshot.change_pct = round(report.price_snapshot.change / report.price_snapshot.prev_close * 100, 2)
+            report.price_snapshot.distance_from_52w_high_pct = market["distance_from_high_52w_pct"]
+            if market.get("low_52w"):
+                report.price_snapshot.distance_from_52w_low_pct = round((market["current_price"] / market["low_52w"] - 1) * 100, 2)
+            observed = sorted({level["price"] for level in report.swing_data["structure_levels"] if level.get("price") and level["kind"] != "dynamic"})
+            report.support_resistance.support_levels = sorted((p for p in observed if p < market["current_price"]), reverse=True)[:3]
+            report.support_resistance.resistance_levels = [p for p in observed if p > market["current_price"]][:3]
+            report.support_resistance.nearest_support = next(iter(report.support_resistance.support_levels), None)
+            report.support_resistance.nearest_resistance = next(iter(report.support_resistance.resistance_levels), None)
+        except Exception as e:
+            logger.warning("Swing market evidence unavailable for %s: %s", req.ticker, e)
+            report.swing_analysis_status = "data_unavailable"
+            report.swing_analysis_error = "Swing market evidence could not be prepared. Retry analysis."
+            return report
         if req.include_llm:
             try:
-                # Build trimmed stock data from calculated technical indicators
-                stock_data = _build_llm_stock_data(report)
-                
-                tags = classify_stock_tags(stock_data, False)
-                payload = build_llm_payload(stock_data, tags)
-                
                 import httpx
                 async with httpx.AsyncClient() as client:
-                    llm_result = await call_llm(payload, client)
-                
-                if llm_result:
-                    report_dict = report.model_dump()
-                    report_dict["llm_analysis"] = llm_result
-                    return report_dict
+                    report.swing_analysis = await analyze_swing(
+                        report.swing_data, client, req.trading_capital, req.risk_pct,
+                    )
+                report.swing_analysis_status = "complete" if report.swing_analysis else "unavailable"
+                if report.swing_analysis is None:
+                    report.swing_analysis_error = "AI swing assessment unavailable. Check the configured AI provider or retry. Market evidence is shown below."
             except Exception as e:
-                logger.warning("LLM enrichment failed for %s: %s", req.ticker, e)
-                # Continue without LLM analysis
+                logger.warning("Swing AI failed for %s: %s", req.ticker, e)
+                report.swing_analysis_status = "unavailable"
+                report.swing_analysis_error = "AI swing assessment could not be validated. Retry analysis. Market evidence remains available."
         
         return report
     except ValueError as e:
@@ -252,7 +274,7 @@ async def screen(req: ScreenerRequest = ScreenerRequest()):
     - **Price**: Current price, Close, Open, High, Low, 52 week high/low
     - **Moving Averages**: DMA 50, DMA 200, SMA 50, SMA 200
     - **Momentum**: RSI
-    - **Volume**: Volume, Volume 1week average
+    - **Volume**: Volume, Volume 1week average, Volume 1 month average (21 trading sessions)
     - **Returns**: Return over 3months
     - **Valuation**: Price to earning, PEG ratio, Market Capitalization (in crores)
     - **Financial Health**: Debt to equity, Return on equity, ROCE, Operating margin
@@ -349,6 +371,56 @@ async def screen(req: ScreenerRequest = ScreenerRequest()):
         raise HTTPException(status_code=500, detail=f"Screening failed: {str(e)}")
 
 
+def _prepare_query_details(
+    matched_tickers: list[str],
+    source_tickers: list[str],
+    failure_reasons: dict[str, str],
+    ai_limit: int,
+) -> tuple[list[dict], list[dict]]:
+    """Build matched details and select up to N usable source stocks in list order."""
+    details: dict[str, dict] = {}
+
+    def fetch_details(tickers: list[str]) -> None:
+        pending = [t for t in dict.fromkeys(tickers) if t not in details and t not in failure_reasons]
+        if not pending:
+            return
+        with ThreadPoolExecutor(max_workers=min(20, len(pending))) as executor:
+            futures = {
+                executor.submit(prepare_stock_data, ticker, raise_errors=True): ticker
+                for ticker in pending
+            }
+            for future in as_completed(futures):
+                ticker = futures[future]
+                try:
+                    data = future.result()
+                    if not data:
+                        failure_reasons[ticker] = "No stock details available"
+                        continue
+                    item = {k: round(v, 2) if isinstance(v, float) else v for k, v in data.items()}
+                    close = item.get("close", 0) or item.get("current_price", 0)
+                    item.update(ticker=ticker, close=close, current_price=close)
+                    for key, multiplier in (
+                        ("entry_zone_low", 0.97), ("entry_zone_high", 1.00),
+                        ("stop_loss", 0.93), ("target_bull", 1.15), ("target_base", 1.10),
+                    ):
+                        item[key] = item.get(key) or (round(close * multiplier, 2) if close else None)
+                    details[ticker] = item
+                except Exception as e:
+                    failure_reasons[ticker] = str(e)
+
+    fetch_details(matched_tickers)
+    selected = []
+    candidates = [t for t in dict.fromkeys(source_tickers) if t not in failure_reasons]
+    position = 0
+    while len(selected) < ai_limit and position < len(candidates):
+        batch = candidates[position:position + ai_limit - len(selected)]
+        position += len(batch)
+        fetch_details(batch)
+        selected.extend(details[t] for t in batch if t in details)
+
+    return [details[t] for t in matched_tickers if t in details], selected
+
+
 async def _run_query_screening(req: ScreenerRequest) -> Union[QueryScreenerReport, QueryScreenerReportWithLLM]:
     """Handle query-based screening logic with optional LLM enrichment."""
     now = datetime.now(timezone.utc).isoformat()
@@ -398,6 +470,10 @@ async def _run_query_screening(req: ScreenerRequest) -> Union[QueryScreenerRepor
             generated_at=now
         )
     
+    # Resolve once so filtering and AI selection share the same ordered source list.
+    if req.include_llm and stocks is None:
+        stocks, _ = get_stock_universe(**universe_params)
+
     if req.queries:
         # Multi-query mode
         result = run_multiple_queries(
@@ -407,42 +483,17 @@ async def _run_query_screening(req: ScreenerRequest) -> Union[QueryScreenerRepor
             **universe_params
         )
         
-        # Build stock details for matched tickers (top N) - parallel fetch
-        top_tickers = result.ordered[:req.top_n]
-        stock_details = []
-        
-        max_workers = min(20, len(top_tickers))
-        if top_tickers:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_to_ticker = {
-                    executor.submit(prepare_stock_data, ticker): ticker
-                    for ticker in top_tickers
-                }
-                for future in as_completed(future_to_ticker):
-                    ticker = future_to_ticker[future]
-                    try:
-                        data = future.result()
-                        if data:
-                            raw_item = {k: round(v, 2) if isinstance(v, float) else v for k, v in data.items()}
-                            close_p = raw_item.get("close", 0) or raw_item.get("current_price", 0)
-                            item = {
-                                **raw_item,
-                                "ticker": ticker,
-                                "current_price": close_p,
-                                "close": close_p,
-                                "entry_zone_low": raw_item.get("entry_zone_low") or (round(close_p * 0.97, 2) if close_p else None),
-                                "entry_zone_high": raw_item.get("entry_zone_high") or (round(close_p * 1.00, 2) if close_p else None),
-                                "stop_loss": raw_item.get("stop_loss") or (round(close_p * 0.93, 2) if close_p else None),
-                                "target_bull": raw_item.get("target_bull") or (round(close_p * 1.15, 2) if close_p else None),
-                                "target_base": raw_item.get("target_base") or (round(close_p * 1.10, 2) if close_p else None),
-                            }
-                            stock_details.append(item)
-                    except Exception:
-                        pass
-        
+        failure_reasons = dict(result.failure_reasons)
+        stock_details, ai_stocks = _prepare_query_details(
+            result.ordered[:req.top_n], stocks or [], failure_reasons,
+            req.llm_max_stocks if req.include_llm else 0,
+        )
+
         # Build base response
         base_response = {
             "mode": "multi_query",
+            "failed_tickers": sorted(failure_reasons),
+            "failure_reasons": failure_reasons,
             "matched_tickers": result.ordered[:req.top_n],
             "total_screened": result.query_results[0].total_screened if result.query_results else 0,
             "duplicates": result.duplicates,
@@ -464,19 +515,11 @@ async def _run_query_screening(req: ScreenerRequest) -> Union[QueryScreenerRepor
         }
         
         # LLM Enrichment (if requested)
-        if req.include_llm and stock_details:
+        if req.include_llm and ai_stocks:
             try:
-                # Select stocks for enrichment (prioritize duplicates)
-                multi_query_data = {
-                    "duplicates": result.duplicates,
-                    "ordered": result.ordered,
-                }
-                selected_stocks, duplicates = select_stocks_for_enrichment(
-                    multi_query_data,
-                    stock_details,
-                    max_stocks=req.llm_max_stocks
-                )
-                
+                selected_stocks = ai_stocks
+                duplicates = result.duplicates
+
                 # Run LLM enrichment
                 enriched_stocks = await enrich_stocks(
                     selected_stocks,
@@ -545,42 +588,17 @@ async def _run_query_screening(req: ScreenerRequest) -> Union[QueryScreenerRepor
             **universe_params
         )
         
-        # Build stock details for matched tickers (top N) - parallel fetch
-        top_tickers = result.matched_tickers[:req.top_n]
-        stock_details = []
-        
-        max_workers = min(20, len(top_tickers))
-        if top_tickers:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_to_ticker = {
-                    executor.submit(prepare_stock_data, ticker): ticker
-                    for ticker in top_tickers
-                }
-                for future in as_completed(future_to_ticker):
-                    ticker = future_to_ticker[future]
-                    try:
-                        data = future.result()
-                        if data:
-                            raw_item = {k: round(v, 2) if isinstance(v, float) else v for k, v in data.items()}
-                            close_p = raw_item.get("close", 0) or raw_item.get("current_price", 0)
-                            item = {
-                                **raw_item,
-                                "ticker": ticker,
-                                "current_price": close_p,
-                                "close": close_p,
-                                "entry_zone_low": raw_item.get("entry_zone_low") or (round(close_p * 0.97, 2) if close_p else None),
-                                "entry_zone_high": raw_item.get("entry_zone_high") or (round(close_p * 1.00, 2) if close_p else None),
-                                "stop_loss": raw_item.get("stop_loss") or (round(close_p * 0.93, 2) if close_p else None),
-                                "target_bull": raw_item.get("target_bull") or (round(close_p * 1.15, 2) if close_p else None),
-                                "target_base": raw_item.get("target_base") or (round(close_p * 1.10, 2) if close_p else None),
-                            }
-                            stock_details.append(item)
-                    except Exception:
-                        pass
-        
+        failure_reasons = dict(result.failure_reasons)
+        stock_details, ai_stocks = _prepare_query_details(
+            result.matched_tickers[:req.top_n], stocks or [], failure_reasons,
+            req.llm_max_stocks if req.include_llm else 0,
+        )
+
         # Build base response
         base_response = {
             "mode": "single_query",
+            "failed_tickers": sorted(failure_reasons),
+            "failure_reasons": failure_reasons,
             "query": result.query,
             "matched_tickers": result.matched_tickers[:req.top_n],
             "total_screened": result.total_screened,
@@ -591,15 +609,11 @@ async def _run_query_screening(req: ScreenerRequest) -> Union[QueryScreenerRepor
         }
         
         # LLM Enrichment (if requested)
-        if req.include_llm and stock_details:
+        if req.include_llm and ai_stocks:
             try:
-                # For single query, no duplicates
-                selected_stocks, duplicates = select_stocks_for_enrichment(
-                    {"duplicates": [], "ordered": result.matched_tickers},
-                    stock_details,
-                    max_stocks=req.llm_max_stocks
-                )
-                
+                selected_stocks = ai_stocks
+                duplicates = []
+
                 # Run LLM enrichment
                 enriched_stocks = await enrich_stocks(
                     selected_stocks,

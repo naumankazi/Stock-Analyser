@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Optional
 
@@ -84,6 +84,8 @@ FIELD_MAP: dict[str, str] = {
     "volume": "volume",
     "volume 1week average": "volume_1w_avg",
     "volume 1 week average": "volume_1w_avg",
+    "volume 1month average": "volume_1m_avg",
+    "volume 1 month average": "volume_1m_avg",
     "avg volume": "volume_1w_avg",
     "average volume": "volume_1w_avg",
     
@@ -129,6 +131,7 @@ FIELD_MAP: dict[str, str] = {
     
     "revenue growth": "revenue_growth",
     "rev growth": "revenue_growth",
+    "yoy quarterly sales growth": "revenue_growth",
     
     "earnings growth": "earnings_growth",
     "profit growth": "earnings_growth",
@@ -213,6 +216,7 @@ class QueryResult:
     total_screened: int
     errors: list[str]
     skipped_tickers: Optional[list[dict]] = None  # Tickers skipped due to missing data
+    failure_reasons: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -223,6 +227,7 @@ class MultiQueryResult:
     ordered: list[str]  # Duplicates first, then rest
     query_results: list[QueryResult]
     query_breakdown: dict[str, list[str]]  # query → matched tickers
+    failure_reasons: dict[str, str] = field(default_factory=dict)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -548,17 +553,17 @@ def _safe_get_info(info: dict, *keys, default=None) -> Any:
     return default
 
 
-def prepare_stock_data(ticker: str) -> dict[str, float] | None:
+def prepare_stock_data(ticker: str, *, raise_errors: bool = False) -> dict[str, float] | None:
     """Prepare all data fields for a single stock.
     
     Combines:
     - Current price data (OHLCV)
     - Computed indicators (RSI, SMA 50/200)
-    - Derived fields (return_3m, volume_1w_avg)
+    - Derived fields (return_3m, volume_1w_avg, volume_1m_avg)
     - Fundamental data (P/E, D/E, ROE, etc.)
     """
     cache = get_analysis_cache()
-    cache_key = f"query_data|{ticker}"
+    cache_key = f"query_data_v2|{ticker}"
     
     if cache_key in cache:
         logger.debug("Cache hit for query data: %s", ticker)
@@ -580,8 +585,7 @@ def prepare_stock_data(ticker: str) -> dict[str, float] | None:
         # Fetch OHLCV data (2 years for indicator computation)
         df = fetch_historical(resolved, period="2y", interval="1d")
         if df.empty:
-            logger.warning("No OHLCV data for %s", ticker)
-            return None
+            raise ValueError(f"No historical data returned for ticker '{ticker}'")
             
         # Latest row for current values
         latest = df.iloc[-1]
@@ -622,6 +626,11 @@ def prepare_stock_data(ticker: str) -> dict[str, float] | None:
         if len(df) >= 5:
             volume_series = df["volume"]
             data["volume_1w_avg"] = float(volume_series.tail(5).mean())
+
+        # One month is approximated by 21 trading sessions, including the latest.
+        # Require a complete window instead of substituting a shorter average.
+        if len(df) >= 21 and df["volume"].tail(21).notna().all():
+            data["volume_1m_avg"] = float(df["volume"].tail(21).mean())
             
         # 52-week high/low
         data["high_52w"] = float(df["high"].max())
@@ -712,6 +721,8 @@ def prepare_stock_data(ticker: str) -> dict[str, float] | None:
         
     except Exception as e:
         logger.warning("Failed to prepare data for %s: %s", ticker, e)
+        if raise_errors:
+            raise
         return None
 
 
@@ -902,13 +913,14 @@ def run_query(
     # Pre-fetch all stock data in parallel for better performance
     logger.info("Pre-fetching data for %d stocks in parallel...", len(stocks))
     stock_data_map: dict[str, dict[str, float] | None] = {}
+    failure_reasons: dict[str, str] = {}
     
     # Use ThreadPoolExecutor for parallel fetching (I/O bound)
-    max_workers = min(20, len(stocks))  # Cap at 20 parallel requests
+    max_workers = max(1, min(20, len(stocks)))  # Allow an empty universe
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all fetch tasks
         future_to_ticker = {
-            executor.submit(prepare_stock_data, ticker): ticker 
+            executor.submit(prepare_stock_data, ticker, raise_errors=True): ticker
             for ticker in stocks
         }
         
@@ -917,9 +929,12 @@ def run_query(
             ticker = future_to_ticker[future]
             try:
                 stock_data_map[ticker] = future.result()
+                if stock_data_map[ticker] is None:
+                    failure_reasons[ticker] = "No data available"
             except Exception as e:
                 logger.warning("Error fetching data for %s: %s", ticker, e)
                 stock_data_map[ticker] = None
+                failure_reasons[ticker] = str(e)
     
     logger.info("Data fetched for %d stocks", len(stock_data_map))
     
@@ -957,7 +972,8 @@ def run_query(
         matched_tickers=matched,
         total_screened=screened_count,
         errors=errors,
-        skipped_tickers=skipped[:20]  # Limit to 20 for response size
+        skipped_tickers=skipped[:20],  # Sample filter diagnostics only
+        failure_reasons=failure_reasons,
     )
 
 
@@ -1002,20 +1018,24 @@ def run_multiple_queries(
     # Pre-fetch all stock data in parallel for better performance
     logger.info("Pre-fetching data for %d stocks in parallel...", len(stocks))
     stock_data_cache: dict[str, dict[str, float] | None] = {}
+    failure_reasons: dict[str, str] = {}
     
-    max_workers = min(20, len(stocks))  # Cap at 20 parallel requests
+    max_workers = max(1, min(20, len(stocks)))
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_ticker = {
-            executor.submit(prepare_stock_data, ticker): ticker 
+            executor.submit(prepare_stock_data, ticker, raise_errors=True): ticker
             for ticker in stocks
         }
         for future in as_completed(future_to_ticker):
             ticker = future_to_ticker[future]
             try:
                 stock_data_cache[ticker] = future.result()
+                if stock_data_cache[ticker] is None:
+                    failure_reasons[ticker] = "No data available"
             except Exception as e:
                 logger.warning("Error fetching data for %s: %s", ticker, e)
                 stock_data_cache[ticker] = None
+                failure_reasons[ticker] = str(e)
     
     logger.info("Data fetched for %d stocks", len(stock_data_cache))
     
@@ -1061,7 +1081,8 @@ def run_multiple_queries(
             query=query,
             matched_tickers=matched,
             total_screened=screened_count,
-            errors=parse_errors
+            errors=parse_errors,
+            failure_reasons=failure_reasons,
         ))
         query_breakdown[query] = matched
     
@@ -1087,7 +1108,8 @@ def run_multiple_queries(
         deduplicated=deduplicated,
         ordered=ordered,
         query_results=query_results,
-        query_breakdown=query_breakdown
+        query_breakdown=query_breakdown,
+        failure_reasons=failure_reasons,
     )
 
 
@@ -1146,14 +1168,14 @@ def get_available_fields() -> dict[str, list[str]]:
             "DMA 50", "DMA 200", "SMA 50", "SMA 200"
         ],
         "Momentum": ["RSI"],
-        "Volume": ["Volume", "Volume 1week average"],
+        "Volume": ["Volume", "Volume 1week average", "Volume 1 month average"],
         "Returns": ["Return over 3months"],
         "Valuation": ["Price to earning", "PEG ratio", "Market Capitalization"],
         "Financial Health": [
             "Debt to equity", "Return on equity", "Return on capital employed",
             "Operating margin", "Profit margin"
         ],
-        "Growth": ["Revenue growth", "Earnings growth", "YOY Quarterly profit growth"],
+        "Growth": ["Revenue growth", "Earnings growth", "YOY Quarterly profit growth", "YOY Quarterly sales growth"],
         "Other": ["Free cash flow", "Beta"]
     }
 

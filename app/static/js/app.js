@@ -9,11 +9,100 @@ function app() {
         report: null,
         loading: false,
         error: null,
+        analysisFailures: [],
         theme: 'dark',
         loadingStep: '',
         chart: null,
         mode: 'analysis',
         includeLLMAnalysis: false,  // Toggle for LLM enrichment in single stock analysis
+        tradingCapital: '',
+        analysisRiskPct: '',
+
+        swingValue(value, suffix = '') {
+            if (value === null || value === undefined || value === '') return 'Unavailable';
+            if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+            if (typeof value === 'number') return Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) + suffix : 'Unavailable';
+            return String(value);
+        },
+
+        swingPrice(value) {
+            return value === null || value === undefined ? 'Unavailable' : this.cs() + this.swingValue(value);
+        },
+
+        fieldLabel(key) {
+            return key.replace(/_/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase());
+        },
+
+        safeExternalUrl(url) {
+            return typeof url === 'string' && /^https?:\/\//i.test(url) ? url : null;
+        },
+        formatErrorDetail(detail, fallback) {
+            if (!detail) return fallback;
+            if (typeof detail === 'string') return detail;
+            if (Array.isArray(detail)) {
+                return detail.map(item => `${item.loc?.at(-1) || 'Request'}: ${item.msg || item}`).join('; ');
+            }
+            if (typeof detail === 'object') return detail.msg || JSON.stringify(detail);
+            return String(detail);
+        },
+        get swingMarketRows() {
+            const m = this.report?.swing_data?.market_data || {};
+            return [
+                ['Current price', 'current_price', 'price'], ['Session open', 'latest_session_open', 'price'],
+                ['Session high', 'latest_session_high', 'price'], ['Session low', 'latest_session_low', 'price'],
+                ['Session close / latest bar', 'latest_session_close', 'price'],
+                ['52-week high', 'high_52w', 'price'], ['52-week low', 'low_52w', 'price'],
+                ['10 EMA', 'ema_10', 'price'], ['20 EMA', 'ema_20', 'price'], ['50 DMA', 'dma_50', 'price'],
+                ['200 DMA', 'dma_200', 'price'], ['RSI (14)', 'rsi_14', ''], ['ATR (14)', 'atr_14', 'price'],
+                ['Current volume', 'current_volume', ''], ['20-day average volume', 'avg_volume_20d', ''],
+                ['Volume / 20-day average', 'volume_vs_20d', '×'], ['1-month return', 'return_1m_pct', '%'],
+                ['3-month return', 'return_3m_pct', '%'], ['Distance from 10 EMA', 'distance_from_ema_10_pct', '%'],
+                ['Distance from 20 EMA', 'distance_from_ema_20_pct', '%'], ['Distance from 50 DMA', 'distance_from_dma_50_pct', '%'],
+                ['Distance from 52-week high', 'distance_from_high_52w_pct', '%'],
+                ['50 DMA change / 20 sessions', 'dma_50_change_20d_pct', '%'],
+                ['200 DMA change / 20 sessions', 'dma_200_change_20d_pct', '%'],
+            ].map(([label, key, suffix]) => ({ label, value: suffix === 'price' ? this.swingPrice(m[key]) : this.swingValue(m[key], suffix) }));
+        },
+
+        get swingSummaryRows() {
+            const s = this.report?.swing_analysis;
+            if (!s) return [];
+            const targets = s.targets || [];
+            return [
+                ['Current price', this.swingPrice(this.report?.swing_data?.market_data?.current_price)],
+                ['Stage', s.stage], ['Stage-2 score /10', this.swingValue(s.stage2_score)],
+                ['Current setup', s.current_setup], ['Entry now?', s.entry_now ? 'Yes' : 'No'],
+                ['Ideal entry zone', this.swingPrice(s.entry_zone_low) + ' – ' + this.swingPrice(s.entry_zone_high)],
+                ['Proposed entry', this.swingPrice(s.proposed_entry)], ['Confirmation trigger', s.confirmation_trigger],
+                ['Technical stop', this.swingPrice(s.technical_stop)], ['Stop distance', this.swingValue(s.stop_distance_pct, '%')],
+                ['Risk per share', this.swingPrice(s.risk_per_share)], ['Stop classification', s.stop_classification],
+                ['Target 1', this.swingPrice(targets[0]?.price)], ['Target 2', this.swingPrice(targets[1]?.price)],
+                ['Extended target', this.swingPrice(targets[2]?.price)],
+                ['Reward/risk to T1', this.swingValue(targets[0]?.reward_risk, 'R')],
+                ['Reward/risk to T2', this.swingValue(targets[1]?.reward_risk, 'R')],
+                ['Suggested partial-profit level', s.partial_profit_plan], ['Trailing method', s.trailing_method],
+                ['Major support', this.swingPrice(s.major_support)], ['Major resistance', this.swingPrice(s.major_resistance)],
+                ['Extension risk', s.extension_risk], ['Relative strength', s.relative_strength],
+                ['Volume quality', s.volume_quality], ['Overall setup score /10', this.swingValue(s.setup_score)],
+            ].map(([label, value]) => ({ label, value: value ?? 'Unavailable' }));
+        },
+
+        get swingSections() {
+            const sections = this.report?.swing_analysis?.sections || {};
+            return Object.entries(sections).map(([key, points], index) => ({ key, title: `${index + 1}. ${this.fieldLabel(key)}`, points }));
+        },
+
+        get swingAnswers() {
+            const a = this.report?.swing_analysis?.answers || {};
+            return [
+                ['What makes this a good or bad entry today?', a.entry_today],
+                ['What is the biggest risk now?', a.biggest_risk],
+                ['What price action would improve the setup?', a.better_setup],
+                ['Buying strength or chasing?', a.strength_or_chasing],
+                ['One event to wait for?', a.one_event_to_wait_for],
+                ['What invalidates the bullish thesis?', a.bullish_thesis_invalidation],
+            ].map(([question, answer]) => ({ question, answer }));
+        },
 
         // Query Filter state
         queryReport: null,
@@ -37,8 +126,6 @@ function app() {
         screenerTopN: 10,
         screenerCustomTickers: '',
         screenerStep: '',
-        failedTickers: [],
-        showFailedTickers: false,
         screenerIncludeLLM: false,   // Toggle for LLM enrichment in screener
         screenerLLMMaxStocks: 10,    // Max stocks to enrich with LLM in screener
 
@@ -52,6 +139,26 @@ function app() {
 
         switchMode(m) {
             this.mode = m;
+        },
+
+        get currentFailures() {
+            if (this.mode === 'analysis') return this.analysisFailures;
+            const report = this.mode === 'query' ? this.queryReport : this.screenerReport;
+            return [...new Set(report?.failed_tickers || [])].map(ticker => ({
+                ticker,
+                reason: report?.failure_reasons?.[ticker] || 'Stock data could not be prepared',
+            }));
+        },
+
+        editFailedTicker(ticker) {
+            this.ticker = ticker;
+            this.mode = 'analysis';
+            this.$nextTick(() => {
+                const input = document.querySelector('[x-model="ticker"]');
+                input?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                input?.focus();
+                input?.select();
+            });
         },
 
         /**
@@ -137,9 +244,11 @@ function app() {
 
         async analyze() {
             if (!this.ticker.trim()) return;
+            const requestedTicker = this.ticker.trim().toUpperCase();
             this.loading = true;
             this.error = null;
             this.report = null;
+            this.analysisFailures = [];
 
             const steps = this.includeLLMAnalysis ? [
                 'Fetching market data...',
@@ -170,8 +279,10 @@ function app() {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
-                        ticker: this.ticker.trim(),
-                        include_llm: this.includeLLMAnalysis 
+                        ticker: requestedTicker,
+                        include_llm: this.includeLLMAnalysis,
+                        trading_capital: this.tradingCapital === '' ? null : Number(this.tradingCapital),
+                        risk_pct: this.analysisRiskPct === '' ? null : Number(this.analysisRiskPct)
                     }),
                 });
 
@@ -179,7 +290,7 @@ function app() {
 
                 if (!res.ok) {
                     const data = await res.json().catch(() => ({}));
-                    throw new Error(data.detail || `HTTP ${res.status}`);
+                    throw new Error(this.formatErrorDetail(data.detail, `HTTP ${res.status}`));
                 }
 
                 this.report = await res.json();
@@ -187,6 +298,7 @@ function app() {
             } catch (e) {
                 console.error('[analyze] error:', e);
                 this.error = e.message;
+                this.analysisFailures = [{ ticker: requestedTicker, reason: e.message }];
             } finally {
                 this.loading = false;
                 clearInterval(progressInterval);
@@ -197,8 +309,6 @@ function app() {
             this.screenerLoading = true;
             this.screenerError = null;
             this.screenerReport = null;
-            this.failedTickers = [];
-            this.showFailedTickers = false;
 
             const steps = this.screenerIncludeLLM ? [
                 'Connecting to market data...',
@@ -254,18 +364,12 @@ function app() {
 
                 if (!res.ok) {
                     const data = await res.json().catch(() => ({}));
-                    throw new Error(data.detail || `HTTP ${res.status}`);
+                    throw new Error(this.formatErrorDetail(data.detail, `HTTP ${res.status}`));
                 }
 
                 const data = await res.json();
                 this.screenerReport = data;
                 
-                // Extract failed tickers from the response if available
-                if (data.failed_tickers && data.failed_tickers.length > 0) {
-                    this.failedTickers = data.failed_tickers;
-                    this.showFailedTickers = true;
-                    console.warn('[runScreener] Failed tickers:', this.failedTickers);
-                }
             } catch (e) {
                 console.error('[runScreener] error:', e);
                 this.screenerError = e.message;
@@ -382,7 +486,7 @@ function app() {
 
                 if (!res.ok) {
                     const data = await res.json().catch(() => ({}));
-                    throw new Error(data.detail || `HTTP ${res.status}`);
+                    throw new Error(this.formatErrorDetail(data.detail, `HTTP ${res.status}`));
                 }
 
                 const data = await res.json();
@@ -486,15 +590,16 @@ function app() {
                 });
             }
 
-            // Trade level lines
-            if (this.report.trade_levels) {
-                const tl = this.report.trade_levels;
-                candleSeries.createPriceLine({ price: tl.ideal_entry, color: '#58a6ff', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: 'Entry' });
-                tl.targets.forEach(t => {
-                    candleSeries.createPriceLine({ price: t.price, color: '#3fb950', lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title: t.label });
-                });
-                tl.stop_losses.forEach(sl => {
-                    candleSeries.createPriceLine({ price: sl.price, color: '#f85149', lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title: sl.label });
+            // Show only the reviewed swing plan, not the legacy percentage-based levels.
+            const swing = this.report.swing_analysis;
+            if (swing) {
+                const lines = [
+                    [swing.proposed_entry, 'Proposed entry', '#58a6ff'],
+                    [swing.technical_stop, 'Technical stop', '#f85149'],
+                    ...(swing.targets || []).map(t => [t.price, t.label, '#3fb950']),
+                ];
+                lines.filter(([price]) => Number.isFinite(price) && price > 0).forEach(([price, title, color]) => {
+                    candleSeries.createPriceLine({ price, title, color, lineWidth: 1, lineStyle: 2, axisLabelVisible: true });
                 });
             }
 
